@@ -1,0 +1,202 @@
+# Interop Contracts — How the Three Apps Share a Vault
+
+**Spec version:** 0.1.0 · Part of the [Campaign Vault Specification](campaign-vault-spec.md).
+
+## Ownership matrix
+
+| Vault path | Kind | Owner (writer) | Readers |
+| --- | --- | --- | --- |
+| `campaign.md` | `campaign` | GM (apps update `oa_refs` only) | all |
+| `regions/*/region.md` | `region` | Hexes on Automatic | all |
+| `regions/*/hexes/*.md` | `hex` | Hexes on Automatic | all |
+| `settlements/*.md` | `settlement` | Towns on Automatic | all |
+| `sites/*/site.md`, `key.md`, `state/` | `site` | Dungeons on Automatic | all |
+| `npcs/*.md`, `factions/*.md` | `npc`/`faction` | shared (minting app or GM; see entity-model) | all |
+| `sessions/*.md` | `session` | GM | all |
+| `commissions/*` | — | requesting app writes request; fulfilling app writes result | both |
+| `player/`, `_index/`, `factions/relationship-map.md` | derived | any writer, deterministic output | all |
+
+"Owner" means: the only app that regenerates the file's managed regions.
+Everyone else treats the file as read-only reference data. GMs outrank owners
+everywhere (managed regions + `oa_locks` are how their edits survive).
+
+## Kind contracts
+
+### `campaign` — campaign.md
+
+Root note. `oa_refs`: `regions`, `settlements`, `sites` (lists — apps append
+their entities on creation). Body: GM material. Frontmatter extras:
+`system: dfrpg` (the family is DFRPG-focused; other values are legal but
+unsupported today).
+
+### `region` — regions/\<slug\>/region.md (HOA)
+
+Frontmatter extras:
+
+```yaml
+region:
+  grid:
+    orientation: flat            # flat-top hexes — family convention (flat_top_hex)
+    columns: 24
+    rows: 18
+    hex_scale_miles: 6           # miles across flats
+    offset: even-q               # offset coordinate scheme; fixed value in 0.1.0
+  terrain_summary: { forest: 102, hills: 58, marsh: 22, ... }
+oa_refs:
+  campaign: camp_...
+  settlements: [set_..., ...]    # settlements located in this region
+  sites: [site_..., ...]         # dungeon sites located in this region
+```
+
+Managed sections: `overview` (prose gazetteer), `travel` (movement cost table,
+encounter guidance). The region's *map data* (per-hex terrain grid) lives in
+the hex files plus an optional opaque app save under `regions/<slug>/state/`.
+
+### `hex` — regions/\<slug\>/hexes/hex-CCRR.md (HOA)
+
+One file per hex **that has content**. Empty wilderness hexes may be elided;
+consumers derive "nothing here" from absence. Frontmatter extras:
+
+```yaml
+hex:
+  coord: "0407"                  # CCRR, zero-padded column then row
+  terrain: marsh                 # closed vocabulary, see hexBlock in schema/vault.schema.json
+  features: [lair, ruin]         # closed vocabulary of overlay features
+oa_refs:
+  region: reg_b8h2m4
+  settlement: set_a77c1p         # if a settlement sits in this hex
+  site: site_k3f9x2              # if a dungeon entrance sits in this hex
+  factions: [fac_...]            # who operates here
+```
+
+Managed sections: `description` (what travelers see), `encounters` (hex-scoped
+encounter guidance, monster refs by package key).
+
+### `settlement` — settlements/\<slug\>.md (TOA)
+
+Frontmatter extras:
+
+```yaml
+settlement:
+  size: village                  # thorp|hamlet|village|small_town|large_town|city
+  population: 640
+oa_refs:
+  region: reg_b8h2m4
+  hex: reg_b8h2m4#hex-0311
+  factions: [fac_...]            # civic factions present
+  npcs: [npc_...]                # notable residents
+  sites: [site_...]              # nearby dungeons this town rumors about
+```
+
+Managed sections: `overview`, `locations` (keyed places of interest),
+`rumors` (rumor table in DOA's `- **[true|false|partial]** text` + indented
+`*GM:*` grammar — the same shape DOA's Adventure Frame emits, so dungeon
+rumors can be merged in verbatim).
+
+### `site` — sites/\<slug\>/ (DOA)
+
+- `site.md` — overview note. Frontmatter extras carry the SiteDigest shape DOA
+  already emits (`pitch`, `hooks`, `rumors`, `danger_band`, room/zone/encounter
+  counts, `factions` with origins`)`; `oa_refs`: `region`, `hex`, `factions`,
+  `npcs` (named opponents that were minted as vault NPCs). Managed sections:
+  `digest`, `getting-there`.
+- `key.md` — the full GM room key, exactly the existing `markdown-gm` export
+  wrapped in one whole-file managed region. Kind `site` with its own `oa_id`
+  and `oa_refs.parent` naming the owning `site.md` note (`parent` is the
+  generic sub-document role: any secondary note of an entity points back with
+  it). Room references inside the key stay in DOA's native grammar
+  (`39 Boss or Master Chamber`, backticked `room_13`); the vault does not
+  rewrite them.
+- `state/` — opaque app artifacts: the saved DungeonState JSON (the artifact
+  of record), generation profiles, exported GCS sheets. Apps other than DOA
+  never open these; the vault ships them around byte-for-byte.
+
+## Cross-app flows
+
+### Stage 0 — manual (works today)
+
+DOA already exports a GM markdown key and a state JSON. A GM makes a
+`sites/<slug>/` folder, drops both in, adds frontmatter to `site.md`. The spec
+is written so this is legal — hand-assembled vaults validate.
+
+### Stage 1 — native vault write (HOA first)
+
+Hexes on Automatic launches vault-native: "Export to Campaign Vault" writes
+`region.md` + hex files + stub settlements/sites/factions with
+`oa_status: stub`, and creates `campaign.md` if the vault does not have one.
+When a `campaign.md` already exists, HOA reads its `oa_id` and links the
+region back to the campaign (`oa_refs.campaign`); appending the region to the
+existing `campaign.md`'s own `oa_refs` and refreshing `_index/` are the
+maturing path, not yet part of the shipping export. Stubs are invitations: a
+stub settlement is TOA's work order, a stub site is DOA's, a stub faction is
+anyone's.
+
+### Stage 2 — file commissions
+
+A structured work order in `commissions/`:
+
+```
+commissions/<slug>.request.json    # written by requesting app or GM
+```
+
+```jsonc
+{
+  "commission_version": 1,
+  "kind": "site",                       // site | settlement | region
+  "vault_ref": "site_k3f9x2",           // the stub entity this fulfills
+  "requested_by": "hexes-on-automatic@0.1.0",
+  "request": { /* kind-specific payload, see below */ },
+  "status": "open"                      // open | fulfilled | declined
+}
+```
+
+- `kind: "site"` payloads use DOA's **SiteCommission** contract verbatim
+  (`seed`, `footprint`, `geographyProse`, `factions[{name?, prose?}]`,
+  `biomeCount`, `knobs`, `enabledSourceBooks`, `polish`, `exports`) — the
+  vault adds only the envelope. Everything the commission doctrine bans
+  (coordinates, exit bindings, caller ids echoed into the dungeon) stays
+  banned; the `vault_ref` linkage lives in the envelope, which DOA writes back
+  but never interprets.
+- The fulfilling app writes the results into the entity's own folder, flips
+  `status: fulfilled`, and fills the stub (`oa_status: stub` → `active`).
+- A hex app commissioning a dungeon hashes its own world coordinates into the
+  seed it requests — "a caller that wants a stable site hashes its own
+  coordinates into the seed" — but per the no-determinism ruling, what it
+  *keeps* is the returned state and markdown, not the recipe.
+
+### Stage 3 — loopback commissions (live handshake)
+
+DOA already runs an opt-in loopback HTTP commission server. The file
+commission and the HTTP commission carry the same payload; Stage 3 just
+delivers it live (requesting app POSTs, then writes the returned artifacts
+into the vault itself). Contract details live with each app; the vault spec
+only fixes the payload shapes and where results land.
+
+## Monster and source references
+
+- Monsters: always `monsterId` + `package@version` (+ `bestiaryUrl`), per the
+  main spec. The 457-record library's ids (`enraged_eggplant_*`, `doa_*`) and
+  the sourceBook key `enraged_eggplant_monsters_2024_05_11` are frozen
+  consumer-stored keys.
+- Book citations: raw codes (`DF3-8`, `DFA109`) — portable; each app re-resolves
+  to local PDFs through its own page-reference mappings. Never write
+  `file:///` links into the vault.
+- Tags referencing DOA's generation vocabulary (`systems/dfrpg/tags.json`,
+  107 ids) must use canonical ids; consumers silently drop unknown tags —
+  same closed-vocabulary posture the apps use internally.
+
+## Publishing (public supporting data)
+
+This spec repo is the canonical public home of the vault format, following the
+family's data-repo conventions:
+
+- Canonical repo → site mirror. If/when vault artifacts are published to
+  dungeonsonautomatic.com, the site mirrors released snapshots into
+  `data/vault/` with an `index.json` pointer; raw repo URLs are never the
+  public API.
+- Releases tag `campaign-vault-vX.Y.Z` with a stable asset name.
+- Licensing is a scope map: spec text + example vault CC BY 4.0, schemas +
+  tooling MIT (see LICENSE.md).
+- Apps stay private; their EULAs and release channels are unchanged. The vault
+  format is public so that *user campaigns are never locked in* — a campaign
+  vault must remain fully usable with no "on Automatic" app installed.

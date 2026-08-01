@@ -1,0 +1,19 @@
+{
+  "commission_version": 1,
+  "kind": "site",
+  "vault_ref": "site_mirefall_warren",
+  "requested_by": "hexes-on-automatic@0.1.0",
+  "request": {
+    "seed": 443127,
+    "footprint": "small",
+    "geographyProse": "A half-flooded warren behind the plunge pool of a waterfall that falls into the ground, at the edge of a peat marsh. Wet worked-stone halls near the entrance; older, drier stonework below. One concealed water entrance via an eel-run under the falls.",
+    "factions": [
+      {
+        "name": "Goblinoid Raiders",
+        "prose": "A goblinoid warband running the site as a toll operation on the marsh road: tolls, hostages, plunder awaiting pickup. They avoid the lowest level entirely."
+      }
+    ],
+    "biomeCount": 1
+  },
+  "status": "fulfilled"
+}

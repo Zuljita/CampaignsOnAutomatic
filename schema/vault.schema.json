@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Zuljita/CampaignsOnAutomatic/schema/vault.schema.json",
+  "title": "Campaign Vault Note Frontmatter",
+  "description": "Frontmatter contract for campaign vault markdown notes, spec 0.1.0. The frontmatter is an open namespace: consumers must ignore and preserve unknown keys.",
+  "type": "object",
+  "required": ["oa_id", "oa_kind", "oa_spec"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1 },
+    "aliases": { "type": "array", "items": { "type": "string" } },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "oa_id": { "$ref": "#/$defs/oaId" },
+    "oa_kind": {
+      "enum": ["campaign", "region", "hex", "settlement", "site", "npc", "faction", "session", "faction_map"]
+    },
+    "oa_spec": { "$ref": "#/$defs/dottedVersion" },
+    "oa_generator": {
+      "type": "string",
+      "description": "<app-package-name>@<version> of the writing app; absent on pure GM notes.",
+      "pattern": "^[a-z][a-z0-9-]*@\\d+\\.\\d+\\.\\d+$"
+    },
+    "oa_status": { "enum": ["stub", "active", "retired"] },
+    "oa_audience": { "enum": ["gm", "player"] },
+    "oa_locks": {
+      "type": "array",
+      "items": { "enum": ["content", "narrative", "geometry"] }
+    },
+    "oa_refs": {
+      "type": "object",
+      "description": "Role name -> oa_id, compound ref, list of either, or (for monsters) external package reference objects.",
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/entityRef" },
+          { "$ref": "#/$defs/monsterRef" },
+          { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/entityRef" }, { "$ref": "#/$defs/monsterRef" }] } }
+        ]
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relationship" }
+    },
+    "identity": { "$ref": "#/$defs/npcIdentity" },
+    "narrative_role": {
+      "enum": ["guard", "hireling", "rival_delver", "lieutenant", "boss", "captive", "merchant", "guide", "cultist", "noncombat"]
+    },
+    "stats": { "$ref": "#/$defs/npcStats" },
+    "faction": { "$ref": "#/$defs/factionBlock" },
+    "region": { "$ref": "#/$defs/regionBlock" },
+    "hex": { "$ref": "#/$defs/hexBlock" },
+    "settlement": { "$ref": "#/$defs/settlementBlock" },
+    "site": { "$ref": "#/$defs/siteBlock" },
+    "system": { "type": "string" }
+  },
+  "$defs": {
+    "oaId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
+      "description": "Stable snake_case id, immutable once written, unique per vault."
+    },
+    "entityRef": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*(#[A-Za-z0-9._:-]+)?$",
+      "description": "oa_id, optionally with an app-internal fragment (site_x#room_13, reg_x#hex-0407)."
+    },
+    "dottedVersion": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d+)*$",
+      "description": "Family dotted-numeric version; missing segments are 0; no prerelease tags."
+    },
+    "monsterRef": {
+      "type": "object",
+      "required": ["id", "package"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$", "description": "monsterId — the durable consumer-stored key." },
+        "package": { "type": "string", "pattern": "^[a-z][a-z0-9-]*@\\d+\\.\\d+\\.\\d+(-[a-z0-9.]+)?$", "description": "package id@version the reference was written against." },
+        "bestiaryUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": ["to", "kind"],
+      "properties": {
+        "to": { "$ref": "#/$defs/entityRef" },
+        "kind": {
+          "enum": ["ally", "enemy", "rival", "truce", "trade", "family", "member_of", "leader_of", "patron_of", "vassal_of", "owes_debt", "worships", "spies_on", "custom"]
+        },
+        "label": { "type": "string", "description": "Required when kind is custom." },
+        "strength": { "type": "integer", "minimum": -3, "maximum": 3 },
+        "secret": { "type": "boolean", "description": "GM-only; stripped from player exports." },
+        "since": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "if": { "properties": { "kind": { "const": "custom" } } },
+      "then": { "required": ["to", "kind", "label"] }
+    },
+    "npcIdentity": {
+      "type": "object",
+      "description": "Flavor identity, mirroring DOA NamedOpponentIdentity. Always safe to embed.",
+      "properties": {
+        "personal_name": { "type": "string" },
+        "epithet": { "type": "string" },
+        "quirk": { "type": "string" },
+        "motive": { "type": "string" }
+      }
+    },
+    "npcStats": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["none", "summary", "linked"] },
+        "source": { "type": "string", "description": "App that owns the stat authority." },
+        "cer": { "type": "integer", "minimum": 0 },
+        "threat_tier": { "enum": ["minor", "standard", "major", "severe"] },
+        "sheet": { "type": "string", "description": "Vault-relative path to a sheet file (e.g. .gcs)." }
+      }
+    },
+    "factionBlock": {
+      "type": "object",
+      "properties": {
+        "scope": { "enum": ["site", "local", "regional", "world"] },
+        "origin": { "enum": ["seed", "emergent", "commissioned", "gm"] },
+        "theme_tags": { "type": "array", "items": { "type": "string" } },
+        "source_faction_id": { "type": "string", "description": "App-side FactionDef id, provenance only — not guaranteed resolvable elsewhere." }
+      }
+    },
+    "regionBlock": {
+      "type": "object",
+      "required": ["grid"],
+      "properties": {
+        "grid": {
+          "type": "object",
+          "required": ["orientation", "columns", "rows", "offset"],
+          "properties": {
+            "orientation": { "const": "flat", "description": "Flat-top hexes — family convention." },
+            "columns": { "type": "integer", "minimum": 1, "maximum": 999 },
+            "rows": { "type": "integer", "minimum": 1, "maximum": 999 },
+            "hex_scale_miles": { "type": "number", "exclusiveMinimum": 0 },
+            "offset": { "const": "even-q" }
+          }
+        },
+        "terrain_summary": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "hexBlock": {
+      "type": "object",
+      "required": ["coord", "terrain"],
+      "properties": {
+        "coord": { "type": "string", "pattern": "^(\\d{4}|\\d{6})$", "description": "CCRR (or CCCRRR for maps wider/taller than 99): zero-padded column then row, equal widths. Coordinates are 1-based — the top-left hex is 0101; a zero column or row component is invalid." },
+        "terrain": {
+          "enum": ["plains", "forest", "hills", "mountains", "marsh", "desert", "tundra", "water", "coast", "badlands"]
+        },
+        "features": {
+          "type": "array",
+          "items": { "enum": ["lair", "ruin", "settlement", "site", "landmark", "resource", "hazard", "crossing", "road", "river"] }
+        }
+      }
+    },
+    "siteBlock": {
+      "type": "object",
+      "description": "Site digest extras carried on site.md (the SiteDigest shape DOA emits). Deliberately permissive: apps may add digest fields freely.",
+      "properties": {
+        "pitch": { "type": "string" },
+        "hooks": { "type": "array", "items": { "type": "string" } },
+        "danger_band": { "type": ["string", "object"] },
+        "rooms": { "type": "integer", "minimum": 0 },
+        "zones": { "type": "integer", "minimum": 0 },
+        "encounters": { "type": "integer", "minimum": 0 },
+        "factions": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "settlementBlock": {
+      "type": "object",
+      "required": ["size"],
+      "properties": {
+        "size": { "enum": ["thorp", "hamlet", "village", "small_town", "large_town", "city"] },
+        "population": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

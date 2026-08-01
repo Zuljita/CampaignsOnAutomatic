@@ -1,0 +1,489 @@
+#!/usr/bin/env node
+// Campaign Vault validator + index compiler (reference implementation).
+// Usage: node scripts/validate-vault.mjs <vault-dir> [--write-index] [--check]
+//   --write-index  regenerate _index/ids.json and _index/relationships.json
+//   --check        regenerate derived indexes in memory and fail on drift
+//
+// Structured errors follow the family convention: { code, message, file }.
+
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { parse as parseYaml } from "yaml";
+
+const SPEC_VERSION = "0.1.0";
+
+const KINDS = new Set([
+  "campaign", "region", "hex", "settlement", "site", "npc", "faction", "session", "faction_map",
+]);
+
+const KIND_PREFIXES = {
+  campaign: "camp_", region: "reg_", settlement: "set_", site: "site_",
+  npc: "npc_", faction: "fac_", session: "sess_", faction_map: "fac_",
+};
+
+const RELATIONSHIP_KINDS = new Set([
+  "ally", "enemy", "rival", "truce", "trade", "family",
+  "member_of", "leader_of", "patron_of", "vassal_of", "owes_debt", "worships", "spies_on",
+  "custom",
+]);
+const SYMMETRIC_KINDS = new Set(["ally", "enemy", "rival", "truce", "trade", "family"]);
+
+const HEX_TERRAIN = new Set([
+  "plains", "forest", "hills", "mountains", "marsh", "desert", "tundra", "water", "coast", "badlands",
+]);
+const HEX_FEATURES = new Set([
+  "lair", "ruin", "settlement", "site", "landmark", "resource", "hazard", "crossing", "road", "river",
+]);
+const SETTLEMENT_SIZES = new Set(["thorp", "hamlet", "village", "small_town", "large_town", "city"]);
+const NARRATIVE_ROLES = new Set([
+  "guard", "hireling", "rival_delver", "lieutenant", "boss", "captive", "merchant", "guide", "cultist", "noncombat",
+]);
+const THREAT_TIERS = new Set(["minor", "standard", "major", "severe"]);
+const LOCK_CLASSES = new Set(["content", "narrative", "geometry"]);
+const STATUSES = new Set(["stub", "active", "retired"]);
+
+const OA_ID_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
+const ENTITY_REF_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*(#[A-Za-z0-9._:-]+)?$/;
+const DOTTED_VERSION_RE = /^\d+(\.\d+)*$/;
+const GENERATOR_RE = /^[a-z][a-z0-9-]*@\d+\.\d+\.\d+$/;
+const PACKAGE_REF_RE = /^[a-z][a-z0-9-]*@\d+\.\d+\.\d+(-[a-z0-9.]+)?$/;
+const HEX_COORD_RE = /^(\d{4}|\d{6})$/;
+const HEX_FRAGMENT_RE = /^hex-(\d{4}|\d{6})$/;
+// One combined fence regex: group 1 = begin section name, group 2 = "end".
+const REGION_FENCE_RE = /<!--\s*oa:generated (?:begin section="([^"]+)"(?:\s+generator="[^"]*")?|(end))\s*-->/g;
+
+function fail(msg) {
+  console.error(msg);
+  process.exit(2);
+}
+
+const args = process.argv.slice(2);
+const vaultDir = args.find((a) => !a.startsWith("--"));
+const writeIndex = args.includes("--write-index");
+const checkDerived = args.includes("--check");
+if (!vaultDir) fail("Usage: validate-vault.mjs <vault-dir> [--write-index] [--check]");
+if (!existsSync(vaultDir)) fail(`Vault directory not found: ${vaultDir}`);
+
+const errors = [];
+const warnings = [];
+function err(code, message, file) { errors.push({ code, message, file }); }
+function warn(code, message, file) { warnings.push({ code, message, file }); }
+
+// ---- walk ------------------------------------------------------------------
+
+function walkMarkdown(dir, out = []) {
+  for (const name of readdirSync(dir).sort()) {
+    if (name.startsWith(".")) continue;
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) {
+      walkMarkdown(full, out);
+    } else if (name.endsWith(".md")) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function vaultPath(file) {
+  return relative(vaultDir, file).split(sep).join("/");
+}
+
+// ---- frontmatter -----------------------------------------------------------
+
+function splitFrontmatter(raw, file) {
+  if (!raw.startsWith("---\n")) return { fm: null, body: raw };
+  const close = raw.indexOf("\n---", 3);
+  if (close === -1) {
+    err("frontmatter_unclosed", "Frontmatter opened but never closed", file);
+    return { fm: null, body: raw };
+  }
+  const fmText = raw.slice(raw.indexOf("\n") + 1, close);
+  const nl = raw.indexOf("\n", close + 1);
+  const body = nl === -1 ? "" : raw.slice(nl + 1);
+  try {
+    const fm = parseYaml(fmText);
+    if (fm !== null && typeof fm !== "object") {
+      err("frontmatter_not_map", "Frontmatter must be a YAML mapping", file);
+      return { fm: null, body };
+    }
+    return { fm, body };
+  } catch (e) {
+    err("frontmatter_parse", `YAML parse failed: ${e.message.split("\n")[0]}`, file);
+    return { fm: null, body };
+  }
+}
+
+// ---- per-note validation ---------------------------------------------------
+
+const notes = []; // { file, rel, fm, body }
+const idToPath = new Map();
+
+const files = walkMarkdown(vaultDir);
+for (const file of files) {
+  const rel = vaultPath(file);
+  // Strip a UTF-8 BOM and normalize CRLF so frontmatter and fence detection
+  // behave identically regardless of platform line endings.
+  const raw = readFileSync(file, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  const { fm, body } = splitFrontmatter(raw, rel);
+  notes.push({ file, rel, fm, body });
+
+  validateManagedRegions(body, rel);
+
+  if (!fm) continue; // pure GM note or parse failure (already reported)
+  if (fm.oa_id === undefined && fm.oa_kind === undefined && fm.oa_spec === undefined) {
+    continue; // pure GM note with human-only frontmatter — always legal
+  }
+
+  for (const key of ["oa_id", "oa_kind", "oa_spec"]) {
+    if (fm[key] === undefined) err("missing_key", `Machine note missing required key ${key}`, rel);
+  }
+  if (fm.oa_id !== undefined) {
+    if (typeof fm.oa_id !== "string" || !OA_ID_RE.test(fm.oa_id)) {
+      err("bad_id", `oa_id ${JSON.stringify(fm.oa_id)} violates id grammar`, rel);
+    } else if (idToPath.has(fm.oa_id)) {
+      err("duplicate_id", `oa_id ${fm.oa_id} already used by ${idToPath.get(fm.oa_id)}`, rel);
+    } else {
+      idToPath.set(fm.oa_id, rel);
+    }
+  }
+  if (fm.oa_kind !== undefined && !KINDS.has(fm.oa_kind)) {
+    err("bad_kind", `Unknown oa_kind ${JSON.stringify(fm.oa_kind)}`, rel);
+  }
+  if (typeof fm.oa_id === "string" && typeof fm.oa_kind === "string") {
+    const prefix = KIND_PREFIXES[fm.oa_kind];
+    if (prefix && !fm.oa_id.startsWith(prefix) && fm.oa_kind !== "hex") {
+      warn("prefix_mismatch", `oa_id ${fm.oa_id} does not use the conventional ${prefix} prefix for kind ${fm.oa_kind}`, rel);
+    }
+  }
+  if (fm.oa_spec !== undefined && (typeof fm.oa_spec !== "string" || !DOTTED_VERSION_RE.test(fm.oa_spec))) {
+    err("bad_spec", `oa_spec ${JSON.stringify(fm.oa_spec)} is not a dotted numeric version`, rel);
+  }
+  if (fm.oa_generator !== undefined && !GENERATOR_RE.test(String(fm.oa_generator))) {
+    err("bad_generator", `oa_generator ${JSON.stringify(fm.oa_generator)} must be <app>@<x.y.z>`, rel);
+  }
+  if (fm.oa_status !== undefined && !STATUSES.has(fm.oa_status)) {
+    err("bad_status", `oa_status ${JSON.stringify(fm.oa_status)} not in stub|active|retired`, rel);
+  }
+  if (fm.oa_audience !== undefined && fm.oa_audience !== "gm" && fm.oa_audience !== "player") {
+    err("bad_audience", `oa_audience ${JSON.stringify(fm.oa_audience)} not in gm|player`, rel);
+  }
+  if (fm.oa_locks !== undefined) {
+    if (!Array.isArray(fm.oa_locks) || fm.oa_locks.some((l) => !LOCK_CLASSES.has(l))) {
+      err("bad_locks", `oa_locks must be a list drawn from content|narrative|geometry`, rel);
+    }
+  }
+
+  validateKindBlock(fm, rel);
+  validateRelationships(fm, rel);
+}
+
+function validateManagedRegions(body, rel) {
+  const sections = new Set();
+  let depth = 0;
+  for (const line of body.split("\n")) {
+    // One combined regex so multiple fences per line (and end-before-begin on
+    // one line) are handled in document order.
+    for (const match of line.matchAll(REGION_FENCE_RE)) {
+      if (match[2]) {
+        // end fence
+        if (depth === 0) err("region_unopened", "oa:generated end without begin", rel);
+        else depth -= 1;
+      } else {
+        // begin fence
+        if (depth > 0) err("region_nested", "Nested oa:generated regions are not allowed", rel);
+        depth += 1;
+        const section = match[1];
+        if (sections.has(section)) err("region_dup_section", `Duplicate managed section "${section}"`, rel);
+        sections.add(section);
+      }
+    }
+  }
+  if (depth !== 0) err("region_unclosed", "oa:generated begin without end", rel);
+}
+
+function validateKindBlock(fm, rel) {
+  switch (fm.oa_kind) {
+    case "region": {
+      const grid = fm.region?.grid;
+      if (!grid) { err("region_missing_grid", "region.grid is required", rel); break; }
+      if (grid.orientation !== "flat") err("region_orientation", 'region.grid.orientation must be "flat" (flat-top hexes)', rel);
+      if (grid.offset !== "even-q") err("region_offset", 'region.grid.offset must be "even-q" in spec 0.1.0', rel);
+      if (!Number.isInteger(grid.columns) || grid.columns < 1) err("region_columns", "region.grid.columns must be a positive integer", rel);
+      if (!Number.isInteger(grid.rows) || grid.rows < 1) err("region_rows", "region.grid.rows must be a positive integer", rel);
+      break;
+    }
+    case "hex": {
+      const regionRef = fm.oa_refs?.region;
+      if (typeof regionRef !== "string") {
+        err("hex_missing_region_ref", "Hex note requires a string oa_refs.region naming its region", rel);
+      }
+      const hex = fm.hex;
+      if (!hex) { err("hex_missing_block", "hex block is required", rel); break; }
+      if (typeof hex.coord !== "string" || !HEX_COORD_RE.test(hex.coord)) {
+        err("hex_coord", `hex.coord ${JSON.stringify(hex.coord)} must be CCRR / CCCRRR zero-padded`, rel);
+      } else {
+        const base = rel.split("/").pop();
+        if (base !== `hex-${hex.coord}.md`) {
+          err("hex_filename", `Hex file ${base} does not match coord ${hex.coord} (expected hex-${hex.coord}.md)`, rel);
+        }
+        const { col, row } = parseHexCoord(hex.coord);
+        if (col === 0 || row === 0) {
+          err("hex_coord_zero", `hex.coord ${hex.coord} has a zero column or row component — coordinates are 1-based (top-left is 0101)`, rel);
+        }
+      }
+      if (!HEX_TERRAIN.has(hex.terrain)) err("hex_terrain", `hex.terrain ${JSON.stringify(hex.terrain)} not in closed vocabulary`, rel);
+      if (hex.features !== undefined && (!Array.isArray(hex.features) || hex.features.some((f) => !HEX_FEATURES.has(f)))) {
+        err("hex_features", "hex.features contains values outside the closed vocabulary", rel);
+      }
+      if (typeof regionRef === "string" && typeof hex.coord === "string" && typeof fm.oa_id === "string") {
+        const expected = `${regionRef}_hex_${hex.coord}`;
+        if (fm.oa_id !== expected) {
+          err("hex_id", `Hex oa_id ${fm.oa_id} should be ${expected} (region id + coord)`, rel);
+        }
+      }
+      break;
+    }
+    case "settlement": {
+      const s = fm.settlement;
+      if (!s) { err("settlement_missing_block", "settlement block is required", rel); break; }
+      if (!SETTLEMENT_SIZES.has(s.size)) err("settlement_size", `settlement.size ${JSON.stringify(s.size)} not in closed vocabulary`, rel);
+      if (s.population !== undefined && (!Number.isInteger(s.population) || s.population < 1)) {
+        err("settlement_population", "settlement.population must be a positive integer", rel);
+      }
+      break;
+    }
+    case "npc": {
+      if (fm.narrative_role !== undefined && !NARRATIVE_ROLES.has(fm.narrative_role)) {
+        err("npc_role", `narrative_role ${JSON.stringify(fm.narrative_role)} not in closed vocabulary`, rel);
+      }
+      if (fm.stats !== undefined) {
+        if (!["none", "summary", "linked"].includes(fm.stats.status)) {
+          err("npc_stats_status", "stats.status must be none|summary|linked", rel);
+        }
+        if (fm.stats.threat_tier !== undefined && !THREAT_TIERS.has(fm.stats.threat_tier)) {
+          err("npc_threat_tier", `stats.threat_tier ${JSON.stringify(fm.stats.threat_tier)} not in closed vocabulary`, rel);
+        }
+        if (fm.stats.status === "linked" && typeof fm.stats.sheet !== "string") {
+          err("npc_stats_sheet", "stats.status linked requires stats.sheet path", rel);
+        }
+        if (typeof fm.stats.sheet === "string") {
+          const segments = fm.stats.sheet.split(/[\\/]/);
+          if (segments.includes("..")) {
+            err("npc_sheet_traversal", `stats.sheet ${fm.stats.sheet} must be vault-relative with no ".." segments`, rel);
+          } else if (!existsSync(join(vaultDir, fm.stats.sheet))) {
+            warn("npc_sheet_missing", `stats.sheet ${fm.stats.sheet} does not exist in the vault`, rel);
+          }
+        }
+      }
+      break;
+    }
+    case "faction": {
+      const f = fm.faction;
+      if (f?.scope !== undefined && !["site", "local", "regional", "world"].includes(f.scope)) {
+        err("faction_scope", `faction.scope ${JSON.stringify(f.scope)} not in closed vocabulary`, rel);
+      }
+      if (f?.origin !== undefined && !["seed", "emergent", "commissioned", "gm"].includes(f.origin)) {
+        err("faction_origin", `faction.origin ${JSON.stringify(f.origin)} not in closed vocabulary`, rel);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function validateRelationships(fm, rel) {
+  if (fm.relationships === undefined) return;
+  if (!Array.isArray(fm.relationships)) {
+    err("rel_not_list", "relationships must be a list", rel);
+    return;
+  }
+  for (const edge of fm.relationships) {
+    if (typeof edge !== "object" || edge === null) { err("rel_shape", "relationship entry must be a map", rel); continue; }
+    if (typeof edge.to !== "string" || !ENTITY_REF_RE.test(edge.to)) {
+      err("rel_to", `relationship.to ${JSON.stringify(edge.to)} is not a valid entity ref`, rel);
+    }
+    if (!RELATIONSHIP_KINDS.has(edge.kind)) {
+      err("rel_kind", `relationship.kind ${JSON.stringify(edge.kind)} not in closed vocabulary`, rel);
+    }
+    if (edge.kind === "custom" && typeof edge.label !== "string") {
+      err("rel_custom_label", "custom relationships require a label", rel);
+    }
+    if (edge.strength !== undefined && (!Number.isInteger(edge.strength) || edge.strength < -3 || edge.strength > 3)) {
+      err("rel_strength", `relationship.strength ${JSON.stringify(edge.strength)} must be an integer in -3..3`, rel);
+    }
+  }
+}
+
+// ---- cross-note validation -------------------------------------------------
+
+function baseId(ref) {
+  const hash = ref.indexOf("#");
+  return hash === -1 ? ref : ref.slice(0, hash);
+}
+
+// CCRR / CCCRRR -> 1-based { col, row } (equal-width halves).
+function parseHexCoord(coord) {
+  const half = coord.length / 2;
+  return { col: Number(coord.slice(0, half)), row: Number(coord.slice(half)) };
+}
+
+// region oa_id -> grid bounds, for hex-fragment range checking.
+const regionGrids = new Map();
+for (const note of notes) {
+  const fm = note.fm;
+  if (fm?.oa_kind !== "region" || typeof fm.oa_id !== "string") continue;
+  const grid = fm.region?.grid;
+  if (grid && Number.isInteger(grid.columns) && Number.isInteger(grid.rows)) {
+    regionGrids.set(fm.oa_id, { columns: grid.columns, rows: grid.rows });
+  }
+}
+
+function checkHexFragment(ref, context, rel) {
+  const hash = ref.indexOf("#");
+  if (hash === -1) return;
+  const match = HEX_FRAGMENT_RE.exec(ref.slice(hash + 1));
+  if (!match) return;
+  const grid = regionGrids.get(ref.slice(0, hash));
+  if (!grid) return;
+  const { col, row } = parseHexCoord(match[1]);
+  if (col === 0 || row === 0 || col > grid.columns || row > grid.rows) {
+    err("hex_fragment_bounds", `${context} -> ${ref}: hex ${match[1]} is outside the region's ${grid.columns}x${grid.rows} grid (coordinates are 1-based; top-left is 0101)`, rel);
+  }
+}
+
+function checkEntityRef(ref, roleName, rel) {
+  if (typeof ref === "object" && ref !== null) {
+    // monster/package reference object
+    if (typeof ref.id !== "string" || !OA_ID_RE.test(ref.id)) {
+      err("ref_monster_id", `oa_refs.${roleName} package reference has invalid id ${JSON.stringify(ref.id)}`, rel);
+    }
+    if (typeof ref.package !== "string" || !PACKAGE_REF_RE.test(ref.package)) {
+      err("ref_monster_package", `oa_refs.${roleName} package reference needs package "<id>@<version>"`, rel);
+    }
+    return;
+  }
+  if (typeof ref !== "string" || !ENTITY_REF_RE.test(ref)) {
+    err("ref_grammar", `oa_refs.${roleName} value ${JSON.stringify(ref)} is not a valid reference`, rel);
+    return;
+  }
+  const base = baseId(ref);
+  if (!idToPath.has(base)) {
+    err("ref_dangling", `oa_refs.${roleName} -> ${ref}: no note with oa_id ${base}`, rel);
+  }
+  checkHexFragment(ref, `oa_refs.${roleName}`, rel);
+}
+
+for (const note of notes) {
+  const { fm, rel } = note;
+  if (!fm?.oa_refs) continue;
+  if (typeof fm.oa_refs !== "object" || Array.isArray(fm.oa_refs)) {
+    err("refs_shape", "oa_refs must be a map of role -> ref(s)", rel);
+    continue;
+  }
+  for (const [role, value] of Object.entries(fm.oa_refs)) {
+    const list = Array.isArray(value) ? value : [value];
+    for (const ref of list) checkEntityRef(ref, role, rel);
+  }
+  if (Array.isArray(fm.relationships)) {
+    for (const edge of fm.relationships) {
+      if (typeof edge?.to === "string" && ENTITY_REF_RE.test(edge.to)) {
+        if (!idToPath.has(baseId(edge.to))) {
+          err("rel_dangling", `relationship -> ${edge.to}: no note with oa_id ${baseId(edge.to)}`, rel);
+        }
+        checkHexFragment(edge.to, "relationship", rel);
+      }
+    }
+  }
+}
+
+// ---- derived index compilation ---------------------------------------------
+
+function compileIds() {
+  const sorted = [...idToPath.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `${JSON.stringify(Object.fromEntries(sorted), null, 2)}\n`;
+}
+
+function compileRelationships() {
+  const edges = [];
+  const seen = new Map(); // dedupe/conflict key -> edge
+  for (const note of notes) {
+    const fm = note.fm;
+    if (!fm || typeof fm.oa_id !== "string" || !Array.isArray(fm.relationships)) continue;
+    for (const edge of fm.relationships) {
+      if (typeof edge?.to !== "string" || !RELATIONSHIP_KINDS.has(edge.kind)) continue;
+      const record = {
+        from: fm.oa_id,
+        to: edge.to,
+        kind: edge.kind,
+        ...(edge.label !== undefined ? { label: edge.label } : {}),
+        ...(edge.strength !== undefined ? { strength: edge.strength } : {}),
+        ...(edge.secret !== undefined ? { secret: edge.secret } : {}),
+        source_file: note.rel,
+      };
+      const pairKey = SYMMETRIC_KINDS.has(edge.kind)
+        ? [record.from, record.to].sort().join("|") + "|" + edge.kind
+        : `${record.from}>${record.to}|${edge.kind}`;
+      if (seen.has(pairKey)) {
+        const prior = seen.get(pairKey);
+        const differs = prior.strength !== record.strength || prior.secret !== record.secret || prior.label !== record.label;
+        if (differs) {
+          err("rel_conflict", `Conflicting duplicate ${edge.kind} edge between ${record.from} and ${record.to} (also declared in ${prior.source_file})`, note.rel);
+        } else {
+          warn("rel_duplicate", `Duplicate ${edge.kind} edge between ${record.from} and ${record.to} (also declared in ${prior.source_file}) — declare each edge once; the index materializes both directions`, note.rel);
+        }
+        continue;
+      }
+      seen.set(pairKey, record);
+      edges.push(record);
+      if (SYMMETRIC_KINDS.has(edge.kind)) {
+        edges.push({ ...record, from: record.to, to: record.from });
+      }
+    }
+  }
+  edges.sort((a, b) => {
+    const ka = `${a.from}|${a.kind}|${a.to}`;
+    const kb = `${b.from}|${b.kind}|${b.to}`;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  return `${JSON.stringify({ oa_spec: SPEC_VERSION, edges }, null, 2)}\n`;
+}
+
+const derived = {
+  "_index/ids.json": compileIds(),
+  "_index/relationships.json": compileRelationships(),
+};
+
+if (writeIndex) {
+  if (errors.length === 0) {
+    mkdirSync(join(vaultDir, "_index"), { recursive: true });
+    for (const [relPath, content] of Object.entries(derived)) {
+      writeFileSync(join(vaultDir, relPath), content, "utf8");
+      console.log(`wrote ${relPath}`);
+    }
+  } else {
+    console.error(`--write-index skipped: vault has ${errors.length} error(s); derived indexes are only written for a clean vault.`);
+  }
+}
+
+if (checkDerived) {
+  for (const [relPath, content] of Object.entries(derived)) {
+    const full = join(vaultDir, relPath);
+    if (!existsSync(full)) {
+      err("derived_missing", `Derived file missing — run with --write-index`, relPath);
+      continue;
+    }
+    const onDisk = readFileSync(full, "utf8").replace(/\r\n/g, "\n");
+    if (onDisk !== content) {
+      err("derived_drift", `Derived file is stale — run with --write-index`, relPath);
+    }
+  }
+}
+
+// ---- report ----------------------------------------------------------------
+
+for (const w of warnings) console.warn(`WARN ${w.code} [${w.file}] ${w.message}`);
+for (const e of errors) console.error(`ERROR ${e.code} [${e.file}] ${e.message}`);
+console.log(`\n${files.length} notes, ${idToPath.size} ids, ${errors.length} errors, ${warnings.length} warnings`);
+if (errors.length > 0) process.exit(1);
+console.log("vault OK");

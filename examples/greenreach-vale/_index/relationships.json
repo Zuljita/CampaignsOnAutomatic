@@ -1,0 +1,124 @@
+{
+  "oa_spec": "0.1.0",
+  "edges": [
+    {
+      "from": "fac_creelmen",
+      "to": "fac_mirefall_warband",
+      "kind": "trade",
+      "strength": 1,
+      "secret": true,
+      "source_file": "factions/creelmen.md"
+    },
+    {
+      "from": "fac_creelmen",
+      "to": "fac_lantern_vigil",
+      "kind": "truce",
+      "strength": 0,
+      "secret": true,
+      "source_file": "factions/creelmen.md"
+    },
+    {
+      "from": "fac_lantern_vigil",
+      "to": "fac_mirefall_warband",
+      "kind": "enemy",
+      "strength": -3,
+      "source_file": "factions/mirefall-warband.md"
+    },
+    {
+      "from": "fac_lantern_vigil",
+      "to": "fac_creelmen",
+      "kind": "truce",
+      "strength": 0,
+      "secret": true,
+      "source_file": "factions/creelmen.md"
+    },
+    {
+      "from": "fac_mirefall_warband",
+      "to": "fac_lantern_vigil",
+      "kind": "enemy",
+      "strength": -3,
+      "source_file": "factions/mirefall-warband.md"
+    },
+    {
+      "from": "fac_mirefall_warband",
+      "to": "fac_thornwake",
+      "kind": "rival",
+      "strength": -1,
+      "source_file": "factions/mirefall-warband.md"
+    },
+    {
+      "from": "fac_mirefall_warband",
+      "to": "fac_creelmen",
+      "kind": "trade",
+      "strength": 1,
+      "secret": true,
+      "source_file": "factions/creelmen.md"
+    },
+    {
+      "from": "fac_thornwake",
+      "to": "fac_mirefall_warband",
+      "kind": "rival",
+      "strength": -1,
+      "source_file": "factions/mirefall-warband.md"
+    },
+    {
+      "from": "npc_hedda_carse",
+      "to": "set_bracken_ford",
+      "kind": "leader_of",
+      "source_file": "npcs/hedda-carse.md"
+    },
+    {
+      "from": "npc_hedda_carse",
+      "to": "fac_lantern_vigil",
+      "kind": "worships",
+      "source_file": "npcs/hedda-carse.md"
+    },
+    {
+      "from": "npc_serrin_talvane",
+      "to": "fac_lantern_vigil",
+      "kind": "leader_of",
+      "source_file": "npcs/serrin-talvane.md"
+    },
+    {
+      "from": "npc_serrin_talvane",
+      "to": "npc_elowen_pell",
+      "kind": "patron_of",
+      "source_file": "npcs/serrin-talvane.md"
+    },
+    {
+      "from": "npc_skarn_halfweight",
+      "to": "fac_creelmen",
+      "kind": "member_of",
+      "source_file": "npcs/skarn-halfweight.md"
+    },
+    {
+      "from": "npc_skarn_halfweight",
+      "to": "npc_serrin_talvane",
+      "kind": "owes_debt",
+      "strength": 2,
+      "source_file": "npcs/skarn-halfweight.md"
+    },
+    {
+      "from": "npc_skarn_halfweight",
+      "to": "npc_uzrek_nine_teeth",
+      "kind": "rival",
+      "strength": -2,
+      "secret": true,
+      "source_file": "npcs/uzrek-nine-teeth.md"
+    },
+    {
+      "from": "npc_uzrek_nine_teeth",
+      "to": "fac_mirefall_warband",
+      "kind": "leader_of",
+      "source_file": "npcs/uzrek-nine-teeth.md"
+    },
+    {
+      "from": "npc_uzrek_nine_teeth",
+      "to": "npc_skarn_halfweight",
+      "kind": "rival",
+      "strength": -2,
+      "secret": true,
+      "source_file": "npcs/uzrek-nine-teeth.md"
+    }
+  ]
+}

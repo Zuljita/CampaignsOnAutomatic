@@ -1,0 +1,6 @@
+# Byte-compared generated files must not drift on Windows autocrlf checkouts.
+_index/** text eol=lf
+examples/**/_index/** text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
