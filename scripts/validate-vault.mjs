@@ -34,6 +34,10 @@ const HEX_TERRAIN = new Set([
 const HEX_FEATURES = new Set([
   "lair", "ruin", "settlement", "site", "landmark", "resource", "hazard", "crossing", "road", "river",
 ]);
+const HEX_CLIMATE = new Set(["cold", "temperate", "hot"]);
+const HEX_OBSTACLES = new Set([
+  "ford", "bridge", "pass", "cliffs", "bog", "scree", "dense_growth", "flood_plain", "toll", "no_water",
+]);
 const SETTLEMENT_SIZES = new Set(["thorp", "hamlet", "village", "small_town", "large_town", "city"]);
 const NARRATIVE_ROLES = new Set([
   "guard", "hireling", "rival_delver", "lieutenant", "boss", "captive", "merchant", "guide", "cultist", "noncombat",
@@ -234,6 +238,22 @@ function validateKindBlock(fm, rel) {
       if (!HEX_TERRAIN.has(hex.terrain)) err("hex_terrain", `hex.terrain ${JSON.stringify(hex.terrain)} not in closed vocabulary`, rel);
       if (hex.features !== undefined && (!Array.isArray(hex.features) || hex.features.some((f) => !HEX_FEATURES.has(f)))) {
         err("hex_features", "hex.features contains values outside the closed vocabulary", rel);
+      }
+      // Biome layer (optional in 0.1): climate closed vocab; biome must agree with climate_terrain.
+      if (hex.climate !== undefined && !HEX_CLIMATE.has(hex.climate)) {
+        err("hex_climate", `hex.climate ${JSON.stringify(hex.climate)} not in closed vocabulary`, rel);
+      }
+      if (hex.biome !== undefined) {
+        const expectedBiome = hex.climate !== undefined && HEX_TERRAIN.has(hex.terrain) ? `${hex.climate}_${hex.terrain}` : null;
+        if (typeof hex.biome !== "string" || !/^(cold|temperate|hot)_[a-z]+$/.test(hex.biome)) {
+          err("hex_biome", `hex.biome ${JSON.stringify(hex.biome)} is malformed (expected <climate>_<terrain>)`, rel);
+        } else if (expectedBiome !== null && hex.biome !== expectedBiome) {
+          err("hex_biome", `hex.biome ${hex.biome} does not agree with climate+terrain (${expectedBiome})`, rel);
+        }
+      }
+      // Obstacle layer (optional in 0.1): closed vocab.
+      if (hex.obstacles !== undefined && (!Array.isArray(hex.obstacles) || hex.obstacles.some((o) => !HEX_OBSTACLES.has(o)))) {
+        err("hex_obstacles", "hex.obstacles contains values outside the closed vocabulary", rel);
       }
       if (typeof regionRef === "string" && typeof hex.coord === "string" && typeof fm.oa_id === "string") {
         const expected = `${regionRef}_hex_${hex.coord}`;

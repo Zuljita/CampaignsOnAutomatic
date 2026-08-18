@@ -153,9 +153,23 @@
         "terrain": {
           "enum": ["plains", "forest", "hills", "mountains", "marsh", "desert", "tundra", "water", "coast", "badlands"]
         },
+        "climate": {
+          "enum": ["cold", "temperate", "hot"],
+          "description": "Climate band. With terrain it forms the biome id (`<climate>_<terrain>`). Optional in 0.1; writers that know it emit it."
+        },
+        "biome": {
+          "type": "string",
+          "pattern": "^(cold|temperate|hot)_(plains|forest|hills|mountains|marsh|desert|tundra|water|coast|badlands)$",
+          "description": "Derived `<climate>_<terrain>`; must agree with the two fields when all present."
+        },
         "features": {
           "type": "array",
           "items": { "enum": ["lair", "ruin", "settlement", "site", "landmark", "resource", "hazard", "crossing", "road", "river"] }
+        },
+        "obstacles": {
+          "type": "array",
+          "description": "What makes travel or entry hard — the fourth hex layer (biome / features / residents / obstacles).",
+          "items": { "enum": ["ford", "bridge", "pass", "cliffs", "bog", "scree", "dense_growth", "flood_plain", "toll", "no_water"] }
         }
       }
     },

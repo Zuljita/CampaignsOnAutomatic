@@ -55,22 +55,41 @@ the hex files plus an optional opaque app save under `regions/<slug>/state/`.
 ### `hex` — regions/\<slug\>/hexes/hex-CCRR.md (HOA)
 
 One file per hex **that has content**. Empty wilderness hexes may be elided;
-consumers derive "nothing here" from absence. Frontmatter extras:
+consumers derive "nothing here" from absence.
+
+A hex is described along **four layers**, each owned differently:
+
+| Layer | What | Who owns it |
+| --- | --- | --- |
+| **biome** | the substrate: `terrain` × `climate` → `biome` id | deterministic only; models never touch it; every other layer keys off it |
+| **features** | what is physically there (`features`) | deterministic places; directors describe |
+| **residents** | who is there (`oa_refs.monsters`, `oa_refs.factions`, later NPCs) | deterministic builds candidate lists; directors pick and stage |
+| **obstacles** | what makes travel or entry hard (`obstacles`) | deterministic seeds from geometry; directors voice, never add or remove |
+
+Frontmatter extras:
 
 ```yaml
 hex:
   coord: "0407"                  # CCRR, zero-padded column then row
   terrain: marsh                 # closed vocabulary, see hexBlock in schema/vault.schema.json
+  climate: cold                  # cold|temperate|hot (optional in 0.1)
+  biome: cold_marsh              # derived <climate>_<terrain>; must agree
   features: [lair, ruin]         # closed vocabulary of overlay features
+  obstacles: [bog, ford]         # closed vocabulary, see hexBlock.obstacles
 oa_refs:
   region: reg_b8h2m4
   settlement: set_a77c1p         # if a settlement sits in this hex
   site: site_k3f9x2              # if a dungeon entrance sits in this hex
   factions: [fac_...]            # who operates here
+  monsters:                      # residents by package key (see main spec)
+    - id: doa_giant_toad
+      package: enraged-eggplant-monsters@0.5.0
+      bestiaryUrl: https://dungeonsonautomatic.com/monsters#doa_giant_toad
 ```
 
-Managed sections: `description` (what travelers see), `encounters` (hex-scoped
-encounter guidance, monster refs by package key).
+Managed sections: `description` (what travelers see, including voiced
+obstacle notes), `encounters` (hex-scoped encounter guidance, monster refs by
+package key).
 
 ### `settlement` — settlements/\<slug\>.md (TOA)
 
