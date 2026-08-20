@@ -4,8 +4,10 @@ aliases: [The Toll-Stakes]
 tags: [faction, faction/goblinoid]
 oa_id: fac_mirefall_warband
 oa_kind: faction
-oa_spec: 0.1.0
+oa_spec: 0.2.0
 oa_generator: dungeons-on-automatic@0.1.71
+oa_reveal:
+  status: revealed
 faction:
   scope: local
   origin: commissioned

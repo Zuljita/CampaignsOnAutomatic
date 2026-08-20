@@ -1,18 +1,20 @@
-# Interop Contracts — How the Three Apps Share a Vault
+# Interop Contracts — How the Apps Share a Vault
 
-**Spec version:** 0.1.0 · Part of the [Campaign Vault Specification](campaign-vault-spec.md).
+**Spec version:** 0.2.0 · Part of the [Campaign Vault Specification](campaign-vault-spec.md).
 
 ## Ownership matrix
 
 | Vault path | Kind | Owner (writer) | Readers |
 | --- | --- | --- | --- |
-| `campaign.md` | `campaign` | GM (apps update `oa_refs` only) | all |
+| `campaign.md` | `campaign` | GM (apps update `oa_refs`, `calendar.current`, and `calendar.elapsed_days` only) | all |
 | `regions/*/region.md` | `region` | Hexes on Automatic | all |
 | `regions/*/hexes/*.md` | `hex` | Hexes on Automatic | all |
 | `settlements/*.md` | `settlement` | Towns on Automatic | all |
 | `sites/*/site.md`, `key.md`, `state/` | `site` | Dungeons on Automatic | all |
 | `npcs/*.md`, `factions/*.md` | `npc`/`faction` | shared (minting app or GM; see entity-model) | all |
-| `sessions/*.md` | `session` | GM | all |
+| `quests/*.md` | `quest` | GM (apps may mint stubs, `oa_status: stub`) | all |
+| `maps/*.md` | `map` | GM (hand-placed pins are the GM's; apps never regenerate them) | all |
+| `sessions/*.md` | `session` | GM (the campaign lens may append to `reveals`) | all |
 | `commissions/*` | — | requesting app writes request; fulfilling app writes result | both |
 | `player/`, `_index/`, `factions/relationship-map.md` | derived | any writer, deterministic output | all |
 
@@ -27,7 +29,78 @@ everywhere (managed regions + `oa_locks` are how their edits survive).
 Root note. `oa_refs`: `regions`, `settlements`, `sites` (lists — apps append
 their entities on creation). Body: GM material. Frontmatter extras:
 `system: dfrpg` (the family is DFRPG-focused; other values are legal but
-unsupported today).
+unsupported today), and optionally the shared campaign **calendar**:
+
+```yaml
+calendar:
+  months:                        # optional; omit for an abstract day-count calendar
+    - { name: Thawmoot, days: 30 }
+    - { name: Greentide, days: 30 }
+  weekdays: [Firstday, Middleday, Lastday]   # optional
+  year_label: VR                 # optional era suffix for display
+  current: { year: 837, month: 6, day: 12 }  # the one current in-world date
+  elapsed_days: 47               # campaign day counter since play began
+```
+
+Rules: `current` is required inside the block (`month` is a 1-based index
+into `months` when months are given); `elapsed_days` is a non-negative
+integer. This is the clock **every lens reads and no lens but the campaign
+one advances**: region-local day counters (Hexes' campaign state) sync to
+`elapsed_days` by offset — mapping shared days onto their own counters, never
+re-keying their deterministic derivations.
+
+### `quest` — quests/\<slug\>.md (GM; apps may mint stubs)
+
+The campaign's threads. Prefix `quest_`. Frontmatter extras:
+
+```yaml
+quest:
+  status: active                 # rumored|active|completed|failed|abandoned
+  objectives:
+    - text: Find the back entrance under the falls
+      done: true                 # optional, default false
+      revealed: true             # optional, default false — player-visible objective
+oa_refs:
+  giver: npc_hedda_carse         # optional
+  targets: [site_k3f9x2, fac_goblinoid_raiders]   # optional — what the thread points at
+```
+
+An objective's `revealed` follows the reveal model: hidden objectives are the
+GM's forward plan and never export. A stub quest (`oa_status: stub`) is a
+rumor promoted to a thread that nobody has fleshed out yet.
+
+### `map` — maps/\<slug\>.md (GM)
+
+An image map with entity-linked pins — the hand-drawn layer beside the
+generated hex atlas. Prefix `map_`. Frontmatter extras:
+
+```yaml
+map:
+  image: assets/vale-overview.png    # vault-relative; images live under assets/
+  pins:
+    - { x: 0.42, y: 0.17, ref: set_bracken_ford, label: Bracken Ford, revealed: true }
+    - { x: 0.71, y: 0.64, ref: site_k3f9x2, label: The Warren }
+```
+
+Pin `x`/`y` are **fractions of image width/height** (0..1) so pins survive
+image rescaling. `ref` is optional (a pin may be a bare label) and may target
+another `map` note — that is the world→city→dungeon nesting chain. Pin
+`revealed` follows the reveal model.
+
+### `session` — sessions/\<date\>-\<slug\>.md (GM)
+
+Frontmatter extras, all optional:
+
+```yaml
+in_world: { year: 837, month: 6, day: 9 }   # when the session happened in-world
+reveals:                                     # what the players learned this session
+  - site_k3f9x2#digest                       # a section of a note
+  - fac_goblinoid_raiders                    # a whole note
+```
+
+`reveals` is the session-keyed reveal **log** — history, where `oa_reveal` on
+the target notes is current state. Ready-made recaps ("here's what you
+learned") derive from it.
 
 ### `region` — regions/\<slug\>/region.md (HOA)
 

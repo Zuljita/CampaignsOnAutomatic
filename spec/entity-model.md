@@ -1,6 +1,6 @@
 # Entity Model — NPCs, Factions, Relationships
 
-**Spec version:** 0.1.0 · Part of the [Campaign Vault Specification](campaign-vault-spec.md).
+**Spec version:** 0.2.0 · Part of the [Campaign Vault Specification](campaign-vault-spec.md).
 
 This layer is **vault-owned**: no single app is the authority. Any app may mint
 NPCs and factions into the shared folders; the GM edits them freely; every app
@@ -138,9 +138,16 @@ relationships:
     kind: enemy                  # see vocabulary
     strength: -3                 # optional, -3..+3 (hostility..devotion)
     secret: true                 # optional; GM-only — stripped from player exports
+    revealed: true               # optional (0.2.0); a disclosed secret keeps both flags
     since: era_2_sacred_order    # optional free-text or era id
     notes: one line of GM context
 ```
+
+`revealed` follows the reveal model in the main spec: a `secret` edge exports
+to players only once it also carries `revealed: true`; keeping both flags
+preserves the history (the table knows *now*, and it was a secret *then*).
+Edge `notes` never export either way. The compiled index carries `revealed`
+through like `secret`.
 
 ### Kind vocabulary
 
@@ -206,7 +213,8 @@ graph LR
 
   Conventions: factions are rectangles, NPCs are stadium shapes
   (`([...])`), secret edges are rendered dashed (`-. kind .->`) and the map is
-  GM-only; a player variant under `player/` omits secret edges entirely.
+  GM-only; a player variant under `player/` omits undisclosed secret edges
+  (`secret` without `revealed`) entirely.
 
 ## How the three apps use this layer
 
