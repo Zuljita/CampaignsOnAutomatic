@@ -334,7 +334,10 @@ The leak rules, normative for any deriving tool:
    `oa_reveal.status` is present.
 2. `partial` notes keep only the sections listed in `oa_reveal.sections`;
    GM prose outside managed regions is never exported (it is the GM's
-   private lane) unless the note is `oa_audience: player`.
+   private lane) unless the note is `oa_audience: player`. A managed section
+   named `secret` is always GM-only regardless of reveal status — it is the
+   established excisable-secret section (hex secrets), and `revealed` on the
+   note must not sweep it along.
 3. Relationship edges export iff not `secret`, or `secret` with
    `revealed: true`. Edge `notes` and any `gm_note`-suffixed field never
    export.

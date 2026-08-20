@@ -13,6 +13,11 @@ quest:
     - text: Pull the toll-stakes, or make them somebody else's problem
       revealed: true
     - text: Learn what the warband will not go below its own cellar to face
+oa_reveal:
+  status: revealed
+oa_refs:
+  giver: npc_hedda_carse
+  targets: [site_mirefall_warren, fac_mirefall_warband]
 ---
 
 # The Mire Toll
