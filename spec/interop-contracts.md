@@ -6,7 +6,7 @@
 
 | Vault path | Kind | Owner (writer) | Readers |
 | --- | --- | --- | --- |
-| `campaign.md` | `campaign` | GM (apps update `oa_refs`, `calendar.current`, and `calendar.elapsed_days` only) | all |
+| `campaign.md` | `campaign` | GM (apps update `oa_refs`, `calendar.current`, `calendar.elapsed_days`, and `party.location` only) | all |
 | `regions/*/region.md` | `region` | Hexes on Automatic | all |
 | `regions/*/hexes/*.md` | `hex` | Hexes on Automatic | all |
 | `settlements/*.md` | `settlement` | Towns on Automatic | all |
@@ -44,10 +44,25 @@ calendar:
 
 Rules: `current` is required inside the block (`month` is a 1-based index
 into `months` when months are given); `elapsed_days` is a non-negative
-integer. This is the clock **every lens reads and no lens but the campaign
-one advances**: region-local day counters (Hexes' campaign state) sync to
-`elapsed_days` by offset — mapping shared days onto their own counters, never
-re-keying their deterministic derivations.
+integer. This is the shared clock every lens reads. Region-local day counters
+(Hexes' campaign state) sync to `elapsed_days` **by offset** — mapping shared
+days onto their own counters, never re-keying their deterministic
+derivations. A lens that plays time forward writes the higher
+`elapsed_days` back (advancing `current` by the same delta); a lens that
+finds the shared clock ahead of its own mapping catches its local counter up
+instead. The clock never rewinds.
+
+And the party's one continuous position across the lenses:
+
+```yaml
+party:
+  location: reg_b8h2m4#hex-0506   # any entity ref — a hex, a settlement, a site
+```
+
+`party.location` is updated by whichever lens the party is currently moving
+through (Hexes as they cross hexes, Towns when they enter a settlement,
+Dungeons when they descend) — the cross-app travel record is the succession
+of values, remembered by each lens's own log and the session notes.
 
 ### `quest` — quests/\<slug\>.md (GM; apps may mint stubs)
 
