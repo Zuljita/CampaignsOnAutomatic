@@ -4,9 +4,12 @@ aliases: [The Warren]
 tags: [site, dungeon, goblinoid]
 oa_id: site_mirefall_warren
 oa_kind: site
-oa_spec: 0.1.0
+oa_spec: 0.2.0
 oa_generator: dungeons-on-automatic@0.1.71
 oa_status: active
+oa_reveal:
+  status: partial
+  sections: [digest]
 site:
   pitch: A flooded toll-warren under the vale's only sinking waterfall.
   danger_band: standard

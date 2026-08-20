@@ -10,16 +10,19 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSy
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 
-const SPEC_VERSION = "0.1.0";
+const SPEC_VERSION = "0.2.0";
 
 const KINDS = new Set([
-  "campaign", "region", "hex", "settlement", "site", "npc", "faction", "session", "faction_map",
+  "campaign", "region", "hex", "settlement", "site", "npc", "faction", "quest", "map", "session", "faction_map",
 ]);
 
 const KIND_PREFIXES = {
   campaign: "camp_", region: "reg_", settlement: "set_", site: "site_",
-  npc: "npc_", faction: "fac_", session: "sess_", faction_map: "fac_",
+  npc: "npc_", faction: "fac_", quest: "quest_", map: "map_", session: "sess_", faction_map: "fac_",
 };
+
+const QUEST_STATUSES = new Set(["rumored", "active", "completed", "failed", "abandoned"]);
+const REVEAL_STATUSES = new Set(["revealed", "partial"]);
 
 const RELATIONSHIP_KINDS = new Set([
   "ally", "enemy", "rival", "truce", "trade", "family",
@@ -129,9 +132,8 @@ for (const file of files) {
   // behave identically regardless of platform line endings.
   const raw = readFileSync(file, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   const { fm, body } = splitFrontmatter(raw, rel);
-  notes.push({ file, rel, fm, body });
-
-  validateManagedRegions(body, rel);
+  const sectionNames = validateManagedRegions(body, rel);
+  notes.push({ file, rel, fm, body, sectionNames });
 
   if (!fm) continue; // pure GM note or parse failure (already reported)
   if (fm.oa_id === undefined && fm.oa_kind === undefined && fm.oa_spec === undefined) {
@@ -179,6 +181,27 @@ for (const file of files) {
 
   validateKindBlock(fm, rel);
   validateRelationships(fm, rel);
+  validateReveal(fm, sectionNames, rel);
+}
+
+function validateReveal(fm, sectionNames, rel) {
+  if (fm.oa_reveal === undefined) return;
+  const reveal = fm.oa_reveal;
+  if (typeof reveal !== "object" || reveal === null || !REVEAL_STATUSES.has(reveal.status)) {
+    err("reveal_status", `oa_reveal.status must be revealed|partial (absent oa_reveal means hidden)`, rel);
+    return;
+  }
+  if (reveal.status === "partial") {
+    if (!Array.isArray(reveal.sections) || reveal.sections.length === 0 || reveal.sections.some((s) => typeof s !== "string")) {
+      err("reveal_sections", "oa_reveal.status partial requires a non-empty sections list", rel);
+      return;
+    }
+    for (const section of reveal.sections) {
+      if (!sectionNames.has(section)) {
+        warn("reveal_section_unknown", `oa_reveal.sections names "${section}" but this file has no such managed section`, rel);
+      }
+    }
+  }
 }
 
 function validateManagedRegions(body, rel) {
@@ -203,6 +226,7 @@ function validateManagedRegions(body, rel) {
     }
   }
   if (depth !== 0) err("region_unclosed", "oa:generated begin without end", rel);
+  return sections;
 }
 
 function validateKindBlock(fm, rel) {
@@ -307,8 +331,127 @@ function validateKindBlock(fm, rel) {
       }
       break;
     }
+    case "campaign": {
+      if (fm.calendar !== undefined) validateCalendar(fm.calendar, rel);
+      break;
+    }
+    case "quest": {
+      const q = fm.quest;
+      if (!q) { err("quest_missing_block", "quest block is required", rel); break; }
+      if (!QUEST_STATUSES.has(q.status)) {
+        err("quest_status", `quest.status ${JSON.stringify(q.status)} not in rumored|active|completed|failed|abandoned`, rel);
+      }
+      if (q.objectives !== undefined) {
+        if (!Array.isArray(q.objectives)) {
+          err("quest_objectives", "quest.objectives must be a list", rel);
+        } else {
+          for (const objective of q.objectives) {
+            if (typeof objective?.text !== "string" || objective.text.length === 0) {
+              err("quest_objective_text", "each quest objective needs non-empty text", rel);
+            }
+            for (const flag of ["done", "revealed"]) {
+              if (objective?.[flag] !== undefined && typeof objective[flag] !== "boolean") {
+                err("quest_objective_flag", `quest objective ${flag} must be boolean`, rel);
+              }
+            }
+          }
+        }
+      }
+      break;
+    }
+    case "map": {
+      const m = fm.map;
+      if (!m) { err("map_missing_block", "map block is required", rel); break; }
+      if (typeof m.image !== "string" || m.image.length === 0) {
+        err("map_image", "map.image must be a vault-relative image path", rel);
+      } else if (m.image.split(/[\\/]/).includes("..")) {
+        err("map_image_traversal", `map.image ${m.image} must be vault-relative with no ".." segments`, rel);
+      } else if (!existsSync(join(vaultDir, m.image))) {
+        warn("map_image_missing", `map.image ${m.image} does not exist in the vault`, rel);
+      }
+      if (m.pins !== undefined) {
+        if (!Array.isArray(m.pins)) {
+          err("map_pins", "map.pins must be a list", rel);
+        } else {
+          for (const pin of m.pins) {
+            for (const axis of ["x", "y"]) {
+              if (typeof pin?.[axis] !== "number" || pin[axis] < 0 || pin[axis] > 1) {
+                err("map_pin_coord", `map pin ${axis} must be a number in 0..1 (fraction of image size)`, rel);
+              }
+            }
+            if (pin?.revealed !== undefined && typeof pin.revealed !== "boolean") {
+              err("map_pin_revealed", "map pin revealed must be boolean", rel);
+            }
+            // Pin ref grammar here; dangling is checked cross-note.
+            if (pin?.ref !== undefined && (typeof pin.ref !== "string" || !ENTITY_REF_RE.test(pin.ref))) {
+              err("map_pin_ref", `map pin ref ${JSON.stringify(pin.ref)} is not a valid entity ref`, rel);
+            }
+          }
+        }
+      }
+      break;
+    }
+    case "session": {
+      if (fm.in_world !== undefined) validateWorldDate(fm.in_world, "in_world", rel);
+      if (fm.reveals !== undefined) {
+        if (!Array.isArray(fm.reveals) || fm.reveals.some((r) => typeof r !== "string" || !ENTITY_REF_RE.test(r))) {
+          err("session_reveals", "reveals must be a list of entity refs (oa_id or oa_id#section)", rel);
+        }
+      }
+      break;
+    }
     default:
       break;
+  }
+}
+
+function validateWorldDate(date, keyName, rel) {
+  if (typeof date !== "object" || date === null) {
+    err("world_date", `${keyName} must be a {year, month, day} map`, rel);
+    return false;
+  }
+  for (const part of ["year", "month", "day"]) {
+    if (!Number.isInteger(date[part])) {
+      err("world_date", `${keyName}.${part} must be an integer`, rel);
+      return false;
+    }
+  }
+  if (date.month < 1 || date.day < 1) {
+    err("world_date", `${keyName} month and day are 1-based`, rel);
+    return false;
+  }
+  return true;
+}
+
+function validateCalendar(calendar, rel) {
+  if (typeof calendar !== "object" || calendar === null) {
+    err("calendar_shape", "calendar must be a map", rel);
+    return;
+  }
+  let months = null;
+  if (calendar.months !== undefined) {
+    if (!Array.isArray(calendar.months) || calendar.months.some((m) => typeof m?.name !== "string" || !Number.isInteger(m?.days) || m.days < 1)) {
+      err("calendar_months", "calendar.months must be a list of { name, days >= 1 }", rel);
+    } else {
+      months = calendar.months;
+    }
+  }
+  if (calendar.weekdays !== undefined && (!Array.isArray(calendar.weekdays) || calendar.weekdays.some((w) => typeof w !== "string"))) {
+    err("calendar_weekdays", "calendar.weekdays must be a list of names", rel);
+  }
+  if (calendar.elapsed_days !== undefined && (!Number.isInteger(calendar.elapsed_days) || calendar.elapsed_days < 0)) {
+    err("calendar_elapsed", "calendar.elapsed_days must be a non-negative integer", rel);
+  }
+  if (calendar.current === undefined) {
+    err("calendar_current", "calendar.current is required inside the calendar block", rel);
+    return;
+  }
+  if (validateWorldDate(calendar.current, "calendar.current", rel) && months !== null) {
+    if (calendar.current.month > months.length) {
+      err("calendar_current_month", `calendar.current.month ${calendar.current.month} exceeds the ${months.length} defined months`, rel);
+    } else if (calendar.current.day > months[calendar.current.month - 1].days) {
+      err("calendar_current_day", `calendar.current.day ${calendar.current.day} exceeds ${months[calendar.current.month - 1].name}'s ${months[calendar.current.month - 1].days} days`, rel);
+    }
   }
 }
 
@@ -331,6 +474,9 @@ function validateRelationships(fm, rel) {
     }
     if (edge.strength !== undefined && (!Number.isInteger(edge.strength) || edge.strength < -3 || edge.strength > 3)) {
       err("rel_strength", `relationship.strength ${JSON.stringify(edge.strength)} must be an integer in -3..3`, rel);
+    }
+    if (edge.revealed !== undefined && typeof edge.revealed !== "boolean") {
+      err("rel_revealed", "relationship.revealed must be boolean", rel);
     }
   }
 }
@@ -417,6 +563,47 @@ for (const note of notes) {
   }
 }
 
+// Section names per oa_id, for reveal-log fragment checking.
+const sectionsById = new Map();
+for (const note of notes) {
+  if (typeof note.fm?.oa_id === "string") sectionsById.set(note.fm.oa_id, note.sectionNames ?? new Set());
+}
+
+for (const note of notes) {
+  const { fm, rel } = note;
+  if (!fm) continue;
+  // Map pin targets resolve like any other ref.
+  if (fm.oa_kind === "map" && Array.isArray(fm.map?.pins)) {
+    for (const pin of fm.map.pins) {
+      if (typeof pin?.ref !== "string" || !ENTITY_REF_RE.test(pin.ref)) continue;
+      if (!idToPath.has(baseId(pin.ref))) {
+        err("map_pin_dangling", `map pin -> ${pin.ref}: no note with oa_id ${baseId(pin.ref)}`, rel);
+      }
+      checkHexFragment(pin.ref, "map pin", rel);
+    }
+  }
+  // Session reveal-log entries resolve; a #section fragment should name a
+  // managed section of the target (warning — logs may outlive refactors).
+  if (fm.oa_kind === "session" && Array.isArray(fm.reveals)) {
+    for (const ref of fm.reveals) {
+      if (typeof ref !== "string" || !ENTITY_REF_RE.test(ref)) continue;
+      const base = baseId(ref);
+      if (!idToPath.has(base)) {
+        err("reveal_dangling", `reveals -> ${ref}: no note with oa_id ${base}`, rel);
+        continue;
+      }
+      const hash = ref.indexOf("#");
+      if (hash !== -1) {
+        const fragment = ref.slice(hash + 1);
+        const targetSections = sectionsById.get(base);
+        if (targetSections !== undefined && !targetSections.has(fragment)) {
+          warn("reveal_fragment_unknown", `reveals -> ${ref}: target has no managed section "${fragment}"`, rel);
+        }
+      }
+    }
+  }
+}
+
 // ---- derived index compilation ---------------------------------------------
 
 function compileIds() {
@@ -439,6 +626,7 @@ function compileRelationships() {
         ...(edge.label !== undefined ? { label: edge.label } : {}),
         ...(edge.strength !== undefined ? { strength: edge.strength } : {}),
         ...(edge.secret !== undefined ? { secret: edge.secret } : {}),
+        ...(edge.revealed !== undefined ? { revealed: edge.revealed } : {}),
         source_file: note.rel,
       };
       const pairKey = SYMMETRIC_KINDS.has(edge.kind)
@@ -446,7 +634,11 @@ function compileRelationships() {
         : `${record.from}>${record.to}|${edge.kind}`;
       if (seen.has(pairKey)) {
         const prior = seen.get(pairKey);
-        const differs = prior.strength !== record.strength || prior.secret !== record.secret || prior.label !== record.label;
+        const differs =
+          prior.strength !== record.strength ||
+          prior.secret !== record.secret ||
+          prior.revealed !== record.revealed ||
+          prior.label !== record.label;
         if (differs) {
           err("rel_conflict", `Conflicting duplicate ${edge.kind} edge between ${record.from} and ${record.to} (also declared in ${prior.source_file})`, note.rel);
         } else {

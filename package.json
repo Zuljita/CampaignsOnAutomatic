@@ -1,6 +1,6 @@
 {
   "name": "campaigns-on-automatic",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Campaign Vault specification, schemas, validator, and example vault for the 'on Automatic' family (Dungeons / Hexes / Towns on Automatic).",
   "author": "Zuljita",
   "license": "SEE LICENSE IN LICENSE.md",

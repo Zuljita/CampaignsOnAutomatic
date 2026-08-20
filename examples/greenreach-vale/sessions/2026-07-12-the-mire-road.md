@@ -3,7 +3,11 @@ title: "Session 1: The Mire Road"
 tags: [session]
 oa_id: sess_2026_07_12_mire_road
 oa_kind: session
-oa_spec: 0.1.0
+oa_spec: 0.2.0
+in_world: { year: 837, month: 2, day: 9 }
+reveals:
+  - fac_mirefall_warband
+  - site_mirefall_warren#digest
 ---
 
 # Session 1 — The Mire Road (2026-07-12)

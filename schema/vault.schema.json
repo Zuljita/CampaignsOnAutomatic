@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Zuljita/CampaignsOnAutomatic/schema/vault.schema.json",
   "title": "Campaign Vault Note Frontmatter",
-  "description": "Frontmatter contract for campaign vault markdown notes, spec 0.1.0. The frontmatter is an open namespace: consumers must ignore and preserve unknown keys.",
+  "description": "Frontmatter contract for campaign vault markdown notes, spec 0.2.0. The frontmatter is an open namespace: consumers must ignore and preserve unknown keys.",
   "type": "object",
   "required": ["oa_id", "oa_kind", "oa_spec"],
   "properties": {
@@ -11,7 +11,7 @@
     "tags": { "type": "array", "items": { "type": "string" } },
     "oa_id": { "$ref": "#/$defs/oaId" },
     "oa_kind": {
-      "enum": ["campaign", "region", "hex", "settlement", "site", "npc", "faction", "session", "faction_map"]
+      "enum": ["campaign", "region", "hex", "settlement", "site", "npc", "faction", "quest", "map", "session", "faction_map"]
     },
     "oa_spec": { "$ref": "#/$defs/dottedVersion" },
     "oa_generator": {
@@ -25,6 +25,7 @@
       "type": "array",
       "items": { "enum": ["content", "narrative", "geometry"] }
     },
+    "oa_reveal": { "$ref": "#/$defs/revealState" },
     "oa_refs": {
       "type": "object",
       "description": "Role name -> oa_id, compound ref, list of either, or (for monsters) external package reference objects.",
@@ -50,7 +51,16 @@
     "hex": { "$ref": "#/$defs/hexBlock" },
     "settlement": { "$ref": "#/$defs/settlementBlock" },
     "site": { "$ref": "#/$defs/siteBlock" },
-    "system": { "type": "string" }
+    "system": { "type": "string" },
+    "calendar": { "$ref": "#/$defs/calendarBlock" },
+    "quest": { "$ref": "#/$defs/questBlock" },
+    "map": { "$ref": "#/$defs/mapBlock" },
+    "in_world": { "$ref": "#/$defs/worldDate" },
+    "reveals": {
+      "type": "array",
+      "description": "Session reveal log: entity refs (whole notes) or ref#section (one managed section) the players learned this session.",
+      "items": { "$ref": "#/$defs/entityRef" }
+    }
   },
   "$defs": {
     "oaId": {
@@ -87,7 +97,8 @@
         },
         "label": { "type": "string", "description": "Required when kind is custom." },
         "strength": { "type": "integer", "minimum": -3, "maximum": 3 },
-        "secret": { "type": "boolean", "description": "GM-only; stripped from player exports." },
+        "secret": { "type": "boolean", "description": "GM-only; stripped from player exports unless also revealed." },
+        "revealed": { "type": "boolean", "description": "A disclosed secret keeps both flags; exports to players." },
         "since": { "type": "string" },
         "notes": { "type": "string" }
       },
@@ -193,6 +204,93 @@
       "properties": {
         "size": { "enum": ["thorp", "hamlet", "village", "small_town", "large_town", "city"] },
         "population": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "revealState": {
+      "type": "object",
+      "required": ["status"],
+      "description": "Player-knowledge state. Absent = hidden (GM-only), the default.",
+      "properties": {
+        "status": { "enum": ["revealed", "partial"] },
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "partial only: the revealed managed-section names in this file."
+        }
+      },
+      "if": { "properties": { "status": { "const": "partial" } } },
+      "then": { "required": ["status", "sections"] }
+    },
+    "worldDate": {
+      "type": "object",
+      "required": ["year", "month", "day"],
+      "properties": {
+        "year": { "type": "integer" },
+        "month": { "type": "integer", "minimum": 1, "description": "1-based index into calendar.months when months are defined." },
+        "day": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "calendarBlock": {
+      "type": "object",
+      "required": ["current"],
+      "description": "The shared campaign clock on campaign.md. Every lens reads it; only the campaign lens (or the GM) advances it.",
+      "properties": {
+        "months": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "days"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "days": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "weekdays": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "year_label": { "type": "string" },
+        "current": { "$ref": "#/$defs/worldDate" },
+        "elapsed_days": { "type": "integer", "minimum": 0, "description": "Campaign day counter since play began; region-local counters sync to it by offset." }
+      }
+    },
+    "questBlock": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["rumored", "active", "completed", "failed", "abandoned"] },
+        "objectives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string", "minLength": 1 },
+              "done": { "type": "boolean" },
+              "revealed": { "type": "boolean", "description": "Player-visible objective; hidden objectives are the GM's forward plan." }
+            }
+          }
+        }
+      }
+    },
+    "mapBlock": {
+      "type": "object",
+      "required": ["image"],
+      "properties": {
+        "image": { "type": "string", "description": "Vault-relative image path (under assets/)." },
+        "pins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of image width." },
+              "y": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of image height." },
+              "ref": { "$ref": "#/$defs/entityRef", "description": "Optional target — an entity or another map note (nesting)." },
+              "label": { "type": "string" },
+              "revealed": { "type": "boolean" }
+            }
+          }
+        }
       }
     }
   }

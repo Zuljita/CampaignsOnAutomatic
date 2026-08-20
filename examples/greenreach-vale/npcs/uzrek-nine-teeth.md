@@ -4,7 +4,7 @@ aliases: [Uzrek]
 tags: [npc, role/boss, faction/mirefall-warband]
 oa_id: npc_uzrek_nine_teeth
 oa_kind: npc
-oa_spec: 0.1.0
+oa_spec: 0.2.0
 oa_generator: dungeons-on-automatic@0.1.71
 identity:
   personal_name: Uzrek
@@ -28,8 +28,10 @@ relationships:
     kind: rival
     strength: -2
     secret: true
+    revealed: true
     notes: Uzrek is sure Skarn shorts him on every bale and is quietly
-      auditioning a replacement fence in Greenreach.
+      auditioning a replacement fence in Greenreach. Came out at the parley
+      when a toll-party griped about short bales in front of the delvers.
 ---
 
 # Uzrek Nine-Teeth

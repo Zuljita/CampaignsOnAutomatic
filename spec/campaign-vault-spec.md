@@ -1,8 +1,19 @@
 # Campaign Vault Specification
 
-**Spec version:** 0.1.0
-**Status:** Draft — implemented first by Hexes on Automatic; Dungeons on Automatic
-and Towns on Automatic adopt in stages (see [interop-contracts.md](interop-contracts.md)).
+**Spec version:** 0.2.0
+**Status:** Draft — implemented first by Hexes on Automatic (writer) and
+Campaigns on Automatic (reader); Dungeons on Automatic and Towns on Automatic
+adopt in stages (see [interop-contracts.md](interop-contracts.md)).
+
+**0.2.0 adds** (2026-08-20, all additive — every valid 0.1.0 vault remains
+valid, no migration required): the campaign layer the lenses share — a
+campaign **calendar** with a current date and elapsed-day counter, dated
+**session** metadata and a per-session reveal log, the **quest** kind (threads
+with objectives), the **map** kind (image maps with entity-linked pins), and
+**reveal states** (`oa_reveal`, plus `revealed` on relationship edges and map
+pins) — the fact-level "what do the players know" layer that player exports
+derive from. Files that use none of the new vocabulary may keep stamping
+`oa_spec: 0.1.0`.
 
 ## What this is
 
@@ -72,6 +83,10 @@ These are inherited from the family's existing rules and are load-bearing:
   factions/
     <faction-slug>.md            # kind: faction       (owner: vault — any app may mint)
     relationship-map.md          # generated mermaid map (derived, regenerable)
+  quests/
+    <quest-slug>.md              # kind: quest         (owner: GM — apps may mint stubs)
+  maps/
+    <map-slug>.md                # kind: map           (owner: GM; images live under assets/)
   sessions/
     <date>-<slug>.md             # kind: session       (owner: GM)
   commissions/
@@ -140,13 +155,14 @@ Machine lane (all keys prefixed `oa_`; apps own these, GMs edit at their own ris
 | Key | Required | Meaning |
 | --- | --- | --- |
 | `oa_id` | yes | Stable id. Immutable once written. See ID scheme. |
-| `oa_kind` | yes | One of: `campaign`, `region`, `hex`, `settlement`, `site`, `npc`, `faction`, `session`, `faction_map`. |
+| `oa_kind` | yes | One of: `campaign`, `region`, `hex`, `settlement`, `site`, `npc`, `faction`, `quest`, `map`, `session`, `faction_map`. |
 | `oa_spec` | yes | Vault spec version this file was written against (dotted numeric string). |
 | `oa_generator` | generated files | `<app-package-name>@<version>` of the writing app. Absent on pure GM notes. |
 | `oa_status` | no | `stub` \| `active` \| `retired`. `stub` marks a placeholder minted by one app for another (or the GM) to fill. Default `active`. |
 | `oa_refs` | no | Map of named references to other vault entities by `oa_id` (see References). |
 | `oa_locks` | no | List drawn from `content`, `narrative`, `geometry`. Mirrors DOA's preservation locks: the owning app must not regenerate locked aspects of this file. |
 | `oa_audience` | no | `gm` (default) \| `player`. Files under `player/` are `player`. |
+| `oa_reveal` | no | The note's player-knowledge state — see GM/player split. Absent = hidden (GM-only), the default for everything a GM or app writes. |
 | `relationships` | npc/faction | Typed relationship edges — see [entity-model.md](entity-model.md). Not `oa_`-prefixed because GMs are *encouraged* to author these. |
 
 Kind-specific keys are defined in [entity-model.md](entity-model.md) (npc,
@@ -273,23 +289,64 @@ content/narrative/geometry preservation locks):
   declare `oa_locks: []` and a single whole-file region; the owner may rewrite
   it wholesale *only* when no locks are present.
 
-## GM/player split
+## GM/player split and reveal states
 
-This section is **directional**: the current release defines the conventions
-below; the enforcement and derivation tooling lands with the first
-player-export implementation.
+Everything outside `player/` is GM material **by default** — the vault is
+spoiler-safe to write in freely because disclosure is always an explicit act.
+0.2.0 makes the knowledge layer concrete: reveal state lives in the vault (the
+GM's own files, portable forever), and player exports are a pure derivation
+over it.
 
-- Everything outside `player/` is GM material by default.
-- Conventions defined today: `oa_audience` (`gm` | `player`), relationship
-  `secret: true`, and GM-only prose fields such as `gm_note` and rumor
-  veracity markers. Nothing currently enforces stripping them, and no tool yet
-  derives `player/` exports.
-- Design intent (unchanged): player exports become derived files under
-  `player/` — `oa_audience: player`, regenerated on demand, never hand-edited
-  — with GM-only fields stripped using the same single-predicate discipline as
-  DOA's `includeRoomKeyFeature`: one exported function decides, every consumer
-  calls it. That machinery ships alongside the first player-export
-  implementation, not with this spec version.
+### Reveal state (`oa_reveal`)
+
+```yaml
+oa_reveal:
+  status: revealed        # or: partial
+  sections: [digest]      # partial only: the revealed managed-section names
+```
+
+- **Absent means hidden.** A note without `oa_reveal` (and without
+  `oa_audience: player`) is GM-only.
+- `status: revealed` — the whole note is player-known (its GM-only fields and
+  secret edges are still stripped on export; see the leak rules).
+- `status: partial` — only the managed sections listed in `sections` are
+  player-known; GM prose and unlisted sections stay hidden. `sections` names
+  refer to the file's own `oa:generated` section names.
+- Relationship edges may carry `revealed: true` (see
+  [entity-model.md](entity-model.md)); map pins may carry `revealed: true`
+  (see the map kind contract). A `secret: true` edge that later carries
+  `revealed: true` is a *disclosed* secret — both flags stay, preserving the
+  history.
+- Reveal state is **current knowledge**; the per-session `reveals` log on
+  session notes (see the session contract) is **history**. The two are
+  related but not enforced against each other — a GM may prune either.
+
+### Player exports (`player/`)
+
+Derived files under `player/` — `oa_audience: player`, regenerated on demand,
+never hand-edited — produced by the leak rules below with the same
+single-predicate discipline as DOA's `includeRoomKeyFeature`: one exported
+function decides, every consumer calls it.
+
+The leak rules, normative for any deriving tool:
+
+1. A note enters the player export iff `oa_audience: player` or
+   `oa_reveal.status` is present.
+2. `partial` notes keep only the sections listed in `oa_reveal.sections`;
+   GM prose outside managed regions is never exported (it is the GM's
+   private lane) unless the note is `oa_audience: player`. A managed section
+   named `secret` is always GM-only regardless of reveal status — it is the
+   established excisable-secret section (hex secrets), and `revealed` on the
+   note must not sweep it along.
+3. Relationship edges export iff not `secret`, or `secret` with
+   `revealed: true`. Edge `notes` and any `gm_note`-suffixed field never
+   export.
+4. Map pins export iff the pin is `revealed: true` or the pin's target note
+   passes rule 1.
+5. Rumor veracity markers (`**[true|false|partial]**`) and `*GM:*` lines are
+   stripped from exported section bodies.
+6. Hidden content must be absent — not greyed out, not elided-with-a-stub —
+   and derived search indexes over `player/` must not contain it.
 
 ## Source attribution
 
@@ -312,6 +369,10 @@ The vault carries the family's licensing posture:
   external package reference)
 - relationship edges use the closed kind vocabulary or declare `kind: custom`
 - managed-region fences are balanced and sections unique per file
+- `oa_reveal` uses the closed status vocabulary; `partial` lists at least one
+  section (a listed section missing from the file is a warning); quest, map,
+  and campaign-calendar blocks follow their kind contracts, and session
+  `reveals` entries resolve like any other ref
 - derived files are re-derivable: `--check` regenerates and byte-compares
   `_index/` today; extending the same check to `relationship-map.md` and
   `player/` exports is planned (until then those are conventions, not

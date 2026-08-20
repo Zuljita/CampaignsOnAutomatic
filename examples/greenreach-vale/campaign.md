@@ -4,8 +4,18 @@ aliases: [The Vale]
 tags: [campaign, dfrpg]
 oa_id: camp_greenreach
 oa_kind: campaign
-oa_spec: 0.1.0
+oa_spec: 0.2.0
 system: dfrpg
+calendar:
+  months:
+    - { name: Thawmoot, days: 30 }
+    - { name: Greentide, days: 30 }
+    - { name: Peatharvest, days: 30 }
+    - { name: Frostwane, days: 30 }
+  weekdays: [Firstday, Fordday, Middleday, Lampday, Marketday, Lastday]
+  year_label: VR
+  current: { year: 837, month: 2, day: 12 }
+  elapsed_days: 11
 oa_refs:
   regions: [reg_greenreach_vale]
   settlements: [set_bracken_ford, set_greenreach]
