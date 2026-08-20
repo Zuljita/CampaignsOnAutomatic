@@ -88,6 +88,10 @@ faction:
   origin: seed                   # seed|emergent|commissioned|gm
   theme_tags: [sacred, religious]
   source_faction_id: sacred_order   # the app-side FactionDef id, if any
+  goals:                         # the faction's turn sheet (0.2.x)
+    - text: Reconsecrate the drowned chapel
+      done: true
+    - text: Put a lantern back on every wayshrine
 relationships:
   - to: fac_goblinoid_raiders
     kind: enemy
@@ -118,6 +122,12 @@ Rules:
 
   Provenance of the underlying app-side definition stays in
   `source_faction_id`, whatever the origin.
+- **`goals` are the faction's turn sheet** — the light between-session
+  faction-turn convention: each goal a checkbox (`text` + optional `done`),
+  advanced by the GM (or the campaign lens on the GM's click) between
+  sessions. Apps minting factions may seed goals; nothing automates them in
+  0.2.x — the checklist IS the mechanism. Goals are GM material and do not
+  derive into player exports.
 - A faction's *presence* list is how hexes, settlements, and sites say "this
   faction operates here" without those files having to enumerate members.
   Granularity: a **region-level** entry means diffuse presence across that

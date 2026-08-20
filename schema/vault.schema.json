@@ -53,6 +53,7 @@
     "site": { "$ref": "#/$defs/siteBlock" },
     "system": { "type": "string" },
     "calendar": { "$ref": "#/$defs/calendarBlock" },
+    "party": { "$ref": "#/$defs/partyBlock" },
     "quest": { "$ref": "#/$defs/questBlock" },
     "map": { "$ref": "#/$defs/mapBlock" },
     "in_world": { "$ref": "#/$defs/worldDate" },
@@ -132,7 +133,27 @@
         "scope": { "enum": ["site", "local", "regional", "world"] },
         "origin": { "enum": ["seed", "emergent", "commissioned", "gm"] },
         "theme_tags": { "type": "array", "items": { "type": "string" } },
-        "source_faction_id": { "type": "string", "description": "App-side FactionDef id, provenance only — not guaranteed resolvable elsewhere." }
+        "source_faction_id": { "type": "string", "description": "App-side FactionDef id, provenance only — not guaranteed resolvable elsewhere." },
+        "goals": {
+          "type": "array",
+          "description": "The faction's turn sheet: checkbox goals the GM advances between sessions. GM material; never derived into player exports.",
+          "items": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string", "minLength": 1 },
+              "done": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "partyBlock": {
+      "type": "object",
+      "required": ["location"],
+      "description": "The party's one continuous position across the lenses; updated by whichever lens the party is moving through.",
+      "properties": {
+        "location": { "$ref": "#/$defs/entityRef" }
       }
     },
     "regionBlock": {

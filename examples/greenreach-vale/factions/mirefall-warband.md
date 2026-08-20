@@ -13,6 +13,11 @@ faction:
   origin: commissioned
   theme_tags: [goblinoid, raider]
   source_faction_id: goblinoid_raiders
+  goals:
+    - text: Stake the causeway approach with fresh boots
+      done: true
+    - text: Keep the toll flowing until first frost
+    - text: Find out what the delvers really paid for at the parley
 oa_refs:
   seat: site_mirefall_warren
   presence: [reg_greenreach_vale#hex-0407, reg_greenreach_vale#hex-0506]

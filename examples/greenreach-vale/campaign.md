@@ -16,6 +16,8 @@ calendar:
   year_label: VR
   current: { year: 837, month: 2, day: 12 }
   elapsed_days: 11
+party:
+  location: reg_greenreach_vale#hex-0506
 oa_refs:
   regions: [reg_greenreach_vale]
   settlements: [set_bracken_ford, set_greenreach]

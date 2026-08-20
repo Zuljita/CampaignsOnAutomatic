@@ -329,10 +329,29 @@ function validateKindBlock(fm, rel) {
       if (f?.origin !== undefined && !["seed", "emergent", "commissioned", "gm"].includes(f.origin)) {
         err("faction_origin", `faction.origin ${JSON.stringify(f.origin)} not in closed vocabulary`, rel);
       }
+      if (f?.goals !== undefined) {
+        if (!Array.isArray(f.goals)) {
+          err("faction_goals", "faction.goals must be a list", rel);
+        } else {
+          for (const goal of f.goals) {
+            if (typeof goal?.text !== "string" || goal.text.length === 0) {
+              err("faction_goal_text", "each faction goal needs non-empty text", rel);
+            }
+            if (goal?.done !== undefined && typeof goal.done !== "boolean") {
+              err("faction_goal_done", "faction goal done must be boolean", rel);
+            }
+          }
+        }
+      }
       break;
     }
     case "campaign": {
       if (fm.calendar !== undefined) validateCalendar(fm.calendar, rel);
+      if (fm.party !== undefined) {
+        if (typeof fm.party !== "object" || fm.party === null || typeof fm.party.location !== "string" || !ENTITY_REF_RE.test(fm.party.location)) {
+          err("party_location", "party.location must be a valid entity ref", rel);
+        }
+      }
       break;
     }
     case "quest": {
@@ -572,6 +591,13 @@ for (const note of notes) {
 for (const note of notes) {
   const { fm, rel } = note;
   if (!fm) continue;
+  // The party's position resolves like any other ref.
+  if (fm.oa_kind === "campaign" && typeof fm.party?.location === "string" && ENTITY_REF_RE.test(fm.party.location)) {
+    if (!idToPath.has(baseId(fm.party.location))) {
+      err("party_dangling", `party.location -> ${fm.party.location}: no note with oa_id ${baseId(fm.party.location)}`, rel);
+    }
+    checkHexFragment(fm.party.location, "party.location", rel);
+  }
   // Map pin targets resolve like any other ref.
   if (fm.oa_kind === "map" && Array.isArray(fm.map?.pins)) {
     for (const pin of fm.map.pins) {
