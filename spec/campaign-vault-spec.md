@@ -320,6 +320,12 @@ oa_reveal:
 - Reveal state is **current knowledge**; the per-session `reveals` log on
   session notes (see the session contract) is **history**. The two are
   related but not enforced against each other — a GM may prune either.
+- **Who writes reveal state:** the campaign lens (or the GM by hand) may add
+  or update `oa_reveal` on any note, set `revealed: true` on any relationship
+  edge, and append to a session's `reveals` log — regardless of which app
+  owns the file. Reveal state is campaign-layer data that happens to live on
+  the entity's note; owners must preserve it on regeneration like any other
+  frontmatter they did not write.
 
 ### Player exports (`player/`)
 
@@ -327,6 +333,41 @@ Derived files under `player/` — `oa_audience: player`, regenerated on demand,
 never hand-edited — produced by the leak rules below with the same
 single-predicate discipline as DOA's `includeRoomKeyFeature`: one exported
 function decides, every consumer calls it.
+
+**The derived file shape** (normative, so independent implementations agree
+byte for byte; the reference validator's `--write-index` derives it and
+`--check` compares it):
+
+- One file per player-visible source note, at `player/<source path>` — so
+  `player/` opened as its own vault root mirrors the campaign's structure and
+  explicit-path wikilinks keep resolving.
+- Frontmatter, in exactly this order and nothing else: `title`, `aliases`,
+  `tags` (each only when the source has them — the human lane names what
+  players know exists), then `oa_audience: player`, then
+  `oa_source: <source oa_id>` (when the source is a machine note). Player
+  files carry **no** `oa_id` — they are derived shadows, not entities, and a
+  copied id would collide with its source.
+- Body: for `oa_audience: player` sources, the source body with the
+  `oa:generated` fence markers stripped (content kept). For reveal-based
+  sources, the player-visible section bodies in document order, joined by
+  blank lines, fence markers stripped, GM markers stripped (rule 5).
+- Wikilinks in the exported body: a link whose target (before any `#`)
+  resolves as an explicit vault-relative path (with or without `.md`) to a
+  player-visible note is kept as written; any other wikilink is replaced by
+  its display text (its alias, else the target's last path segment). Hidden
+  things are absent even as link targets.
+- Regeneration replaces the whole tree: a previously derived file (one
+  carrying the `oa_audience: player` marker) whose source is no longer
+  player-visible is deleted. Files under `player/` without the marker are
+  someone's mistake and are left alone (and flagged).
+- One structured carve-out: a quest note's **revealed objectives** derive as
+  a markdown task list appended after the body — a `## Objectives` heading,
+  then `- [x] `/`- [ ] ` lines (done/undone) in declaration order, revealed
+  objectives only.
+- v1 scope note: beyond that, player files are prose — other kind blocks
+  (map pins, calendar), relationship edges, and referenced assets are not
+  yet carried; the campaign lens's live player view covers them until a
+  later revision defines their derived shapes.
 
 The leak rules, normative for any deriving tool:
 
@@ -374,9 +415,10 @@ The vault carries the family's licensing posture:
   and campaign-calendar blocks follow their kind contracts, and session
   `reveals` entries resolve like any other ref
 - derived files are re-derivable: `--check` regenerates and byte-compares
-  `_index/` today; extending the same check to `relationship-map.md` and
-  `player/` exports is planned (until then those are conventions, not
-  enforced)
+  `_index/` and the `player/` export; a file under `player/` carrying an
+  `oa_id` is an error (derived shadows are not entities), and one without the
+  `oa_audience: player` marker is flagged as foreign. Extending the same
+  check to `relationship-map.md` is planned.
 
 Vaults are allowed to be *incomplete* (stubs, dangling wikilinks in prose) but
 never *inconsistent* (dangling `oa_refs`, duplicate ids).

@@ -6,7 +6,7 @@
 //
 // Structured errors follow the family convention: { code, message, file }.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, rmSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -604,6 +604,124 @@ for (const note of notes) {
   }
 }
 
+// ---- per-file player/ rules -------------------------------------------------
+
+for (const note of notes) {
+  if (!note.rel.startsWith("player/")) continue;
+  if (note.fm?.oa_id !== undefined) {
+    err("player_has_id", "Files under player/ are derived shadows and must not carry an oa_id", note.rel);
+  }
+}
+
+// ---- player/ derivation (spec: normative derived file shape) ----------------
+
+function yamlString(value) {
+  if (/^[A-Za-z0-9][A-Za-z0-9 .,'()-]*$/.test(value) && !/^(true|false|null|yes|no)$/i.test(value)) {
+    return value;
+  }
+  return JSON.stringify(value);
+}
+
+function noteInPlayerView(fm) {
+  if (!fm) return false;
+  return fm.oa_audience === "player" || (fm.oa_reveal !== undefined && fm.oa_reveal !== null);
+}
+
+// Body split into alternating gm/generated runs, same grammar as the fences.
+function splitSegments(body) {
+  const segments = [];
+  const beginRe = /<!--\s*oa:generated begin section="([^"]+)"(?:\s+generator="[^"]*")?\s*-->/;
+  let rest = body;
+  for (;;) {
+    const match = beginRe.exec(rest);
+    if (!match) {
+      if (rest.trim() !== "") segments.push({ kind: "gm", section: null, text: rest });
+      return segments;
+    }
+    const endAt = rest.indexOf("<!-- oa:generated end -->", match.index);
+    if (endAt === -1) {
+      if (rest.trim() !== "") segments.push({ kind: "gm", section: null, text: rest });
+      return segments;
+    }
+    const before = rest.slice(0, match.index);
+    if (before.trim() !== "") segments.push({ kind: "gm", section: null, text: before });
+    const interior = rest.slice(match.index + match[0].length, endAt).replace(/^\n/, "").replace(/\n$/, "");
+    segments.push({ kind: "generated", section: match[1], text: interior });
+    rest = rest.slice(endAt + "<!-- oa:generated end -->".length);
+  }
+}
+
+function segmentInPlayerView(fm, segment) {
+  if (fm.oa_audience === "player") return true;
+  if (fm.oa_reveal === undefined || fm.oa_reveal === null) return false;
+  if (segment.kind === "gm") return false;
+  if (segment.section === "secret") return false;
+  if (fm.oa_reveal.status === "revealed") return true;
+  return Array.isArray(fm.oa_reveal.sections) && fm.oa_reveal.sections.includes(segment.section);
+}
+
+function stripGmMarkers(text) {
+  return text
+    .split("\n")
+    .filter((line) => !/^\s*\*GM:\*/.test(line.trim()))
+    .map((line) => line.replace(/\*\*\[(?:true|false|partial)\]\*\*\s*/g, ""))
+    .join("\n");
+}
+
+function rewriteWikilinks(text, visibleByPath) {
+  return text.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g, (whole, target, alias) => {
+    const clean = target.split("#")[0].trim();
+    const resolved = visibleByPath.get(clean) ?? visibleByPath.get(`${clean}.md`);
+    if (resolved === true) return whole;
+    const display = alias !== undefined ? alias : (clean.split("/").pop() ?? clean).replace(/\.md$/, "");
+    return display;
+  });
+}
+
+function derivePlayerFiles() {
+  const sources = notes.filter((note) => !note.rel.startsWith("player/"));
+  const visibleByPath = new Map();
+  for (const note of sources) visibleByPath.set(note.rel, noteInPlayerView(note.fm));
+  const out = new Map();
+  for (const note of sources) {
+    const fm = note.fm;
+    if (!noteInPlayerView(fm)) continue;
+    const lines = ["---"];
+    if (typeof fm.title === "string") lines.push(`title: ${yamlString(fm.title)}`);
+    if (Array.isArray(fm.aliases) && fm.aliases.length > 0) {
+      lines.push(`aliases: [${fm.aliases.map((a) => yamlString(String(a))).join(", ")}]`);
+    }
+    if (Array.isArray(fm.tags) && fm.tags.length > 0) {
+      lines.push(`tags: [${fm.tags.map((t) => yamlString(String(t))).join(", ")}]`);
+    }
+    lines.push("oa_audience: player");
+    if (typeof fm.oa_id === "string") lines.push(`oa_source: ${fm.oa_id}`);
+    lines.push("---");
+    let body;
+    if (fm.oa_audience === "player") {
+      body = splitSegments(note.body).map((s) => s.text.replace(/^\n/, "").replace(/\n$/, "")).join("\n\n").trim();
+    } else {
+      body = splitSegments(note.body)
+        .filter((s) => segmentInPlayerView(fm, s))
+        .map((s) => stripGmMarkers(s.text))
+        .join("\n\n")
+        .trim();
+    }
+    body = rewriteWikilinks(body, visibleByPath);
+    // The one structured carve-out: revealed quest objectives as a task list.
+    if (fm.oa_kind === "quest" && Array.isArray(fm.quest?.objectives)) {
+      const revealedObjectives = fm.quest.objectives.filter((o) => o?.revealed === true && typeof o?.text === "string");
+      if (revealedObjectives.length > 0) {
+        const list = revealedObjectives.map((o) => `- [${o.done === true ? "x" : " "}] ${o.text}`).join("\n");
+        body = body === "" ? `## Objectives\n\n${list}` : `${body}\n\n## Objectives\n\n${list}`;
+      }
+    }
+    const content = body === "" ? `${lines.join("\n")}\n` : `${lines.join("\n")}\n\n${body}\n`;
+    out.set(`player/${note.rel}`, content);
+  }
+  return out;
+}
+
 // ---- derived index compilation ---------------------------------------------
 
 function compileIds() {
@@ -661,17 +779,34 @@ function compileRelationships() {
   return `${JSON.stringify({ oa_spec: SPEC_VERSION, edges }, null, 2)}\n`;
 }
 
+const playerFiles = derivePlayerFiles();
 const derived = {
   "_index/ids.json": compileIds(),
   "_index/relationships.json": compileRelationships(),
+  ...Object.fromEntries(playerFiles),
 };
+
+// Previously derived player files whose source went dark: delete on write,
+// error on check. Marker-less files under player/ are someone's mistake and
+// are only flagged — nothing hand-authored belongs there, but we never
+// delete what we did not write.
+const stalePlayer = [];
+for (const note of notes) {
+  if (!note.rel.startsWith("player/") || playerFiles.has(note.rel)) continue;
+  if (note.fm?.oa_audience === "player") stalePlayer.push(note.rel);
+  else warn("player_foreign_file", "File under player/ without the oa_audience: player marker — player/ is derived, nothing hand-authored belongs here", note.rel);
+}
 
 if (writeIndex) {
   if (errors.length === 0) {
-    mkdirSync(join(vaultDir, "_index"), { recursive: true });
     for (const [relPath, content] of Object.entries(derived)) {
+      mkdirSync(join(vaultDir, relPath, ".."), { recursive: true });
       writeFileSync(join(vaultDir, relPath), content, "utf8");
       console.log(`wrote ${relPath}`);
+    }
+    for (const relPath of stalePlayer) {
+      rmSync(join(vaultDir, relPath));
+      console.log(`removed ${relPath} (source no longer player-visible)`);
     }
   } else {
     console.error(`--write-index skipped: vault has ${errors.length} error(s); derived indexes are only written for a clean vault.`);
@@ -689,6 +824,9 @@ if (checkDerived) {
     if (onDisk !== content) {
       err("derived_drift", `Derived file is stale — run with --write-index`, relPath);
     }
+  }
+  for (const relPath of stalePlayer) {
+    err("derived_stale", `Derived player file's source is no longer player-visible — run with --write-index`, relPath);
   }
 }
 
