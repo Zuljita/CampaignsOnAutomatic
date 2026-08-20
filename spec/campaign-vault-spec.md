@@ -348,9 +348,10 @@ byte for byte; the reference validator's `--write-index` derives it and
   files carry **no** `oa_id` — they are derived shadows, not entities, and a
   copied id would collide with its source.
 - Body: for `oa_audience: player` sources, the source body with the
-  `oa:generated` fence markers stripped (content kept). For reveal-based
-  sources, the player-visible section bodies in document order, joined by
-  blank lines, fence markers stripped, GM markers stripped (rule 5).
+  `oa:generated` fence markers stripped (content kept; run boundaries
+  normalize to exactly one blank line). For reveal-based sources, the
+  player-visible section bodies in document order, joined by single blank
+  lines, fence markers stripped, GM markers stripped (rule 5).
 - Wikilinks in the exported body: a link whose target (before any `#`)
   resolves as an explicit vault-relative path (with or without `.md`) to a
   player-visible note is kept as written; any other wikilink is replaced by
