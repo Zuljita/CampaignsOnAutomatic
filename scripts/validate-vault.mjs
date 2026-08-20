@@ -699,7 +699,8 @@ function derivePlayerFiles() {
     lines.push("---");
     let body;
     if (fm.oa_audience === "player") {
-      body = splitSegments(note.body).map((s) => s.text.replace(/^\n/, "").replace(/\n$/, "")).join("\n\n").trim();
+      // Segment boundaries normalize to exactly one blank line on join.
+      body = splitSegments(note.body).map((s) => s.text.replace(/^\n+/, "").replace(/\n+$/, "")).join("\n\n").trim();
     } else {
       body = splitSegments(note.body)
         .filter((s) => segmentInPlayerView(fm, s))
