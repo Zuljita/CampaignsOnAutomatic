@@ -4,6 +4,8 @@ tags: [map]
 oa_id: map_vale_overview
 oa_kind: map
 oa_spec: 0.2.0
+oa_reveal:
+  status: revealed
 map:
   image: assets/vale-overview.png
   pins:
