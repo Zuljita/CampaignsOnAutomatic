@@ -53,7 +53,8 @@ and saved state are the artifacts of record.
 ## Status
 
 Spec 0.2.0 (draft) — 0.1.0 plus the campaign layer: calendar, quests, maps with
-pins, and reveal states (all additive; 0.1.0 vaults remain valid). Hexes on
+pins, reveal states, and the campaign note's `setting-questions` region (all
+additive; 0.1.0 vaults remain valid). Hexes on
 Automatic is the first vault-native writer and Campaigns on Automatic the
 first whole-vault reader;
 Dungeons on Automatic's existing GM markdown + state exports drop into a vault
