@@ -1,0 +1,17 @@
+{
+  "commission_version": 1,
+  "kind": "npc",
+  "vault_ref": "npc_vale_wizard",
+  "requested_by": "campaigns-on-automatic@0.1.0",
+  "request": {
+    "roleId": "wizard",
+    "tier": 187,
+    "count": 1,
+    "mode": "guided",
+    "faction": "Unaligned, and the Lantern Vigil would rather it stayed that way.",
+    "room": "Greenreach, the market town on the plains road — three days east of the ford.",
+    "ecologyTags": ["peat", "marsh", "lantern-line"],
+    "includeSheets": true
+  },
+  "status": "open"
+}

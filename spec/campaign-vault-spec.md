@@ -14,8 +14,10 @@ with objectives), the **map** kind (image maps with entity-linked pins), and
 pins) — the fact-level "what do the players know" layer that player exports
 derive from. It also gives the campaign note a **setting-questions** managed
 region: the GM's own answers to the questions players ask about a setting,
-kept in the vault where every lens can read them (see
-[interop-contracts.md](interop-contracts.md)). Files that use none of the new
+kept in the vault where every lens can read them — and, for the ones the
+campaign cannot answer yet, the **`npc` commission kind**, so "there is no
+wizard in this land" can become a work order for the app that makes people
+(see [interop-contracts.md](interop-contracts.md)). Files that use none of the new
 vocabulary may keep stamping `oa_spec: 0.1.0`.
 
 ## What this is

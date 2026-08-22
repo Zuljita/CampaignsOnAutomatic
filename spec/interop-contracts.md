@@ -308,7 +308,7 @@ commissions/<slug>.request.json    # written by requesting app or GM
 ```jsonc
 {
   "commission_version": 1,
-  "kind": "site",                       // site | settlement | region
+  "kind": "site",                       // site | settlement | region | npc
   "vault_ref": "site_k3f9x2",           // the stub entity this fulfills
   "requested_by": "hexes-on-automatic@0.1.0",
   "request": { /* kind-specific payload, see below */ },
@@ -323,6 +323,15 @@ commissions/<slug>.request.json    # written by requesting app or GM
   (coordinates, exit bindings, caller ids echoed into the dungeon) stays
   banned; the `vault_ref` linkage lives in the envelope, which DOA writes back
   but never interprets.
+- `kind: "npc"` payloads use the **NpcCommission** contract (`seed`, `roleId`
+  or `narrativeRole`, `tier` 62/125/187, `raceId`, `count`, `names`, `mode`,
+  the individuating context lines `room`/`faction`/`warband`, `ecologyTags`,
+  `includeSheets`, `knobs`). The order names a *person the campaign needs* —
+  "the mightiest wizard in the land", "someone who will sell you a sword" —
+  and the results are an `npcs/<slug>.md` note plus, when asked for, a
+  character sheet under the entity's own folder. Characters on Automatic is
+  the owner; until it ships, Dungeons on Automatic carries the generator and
+  can fulfil these orders. Requesting apps write the envelope either way.
 - The fulfilling app writes the results into the entity's own folder, flips
   `status: fulfilled`, and fills the stub (`oa_status: stub` → `active`).
 - A hex app commissioning a dungeon hashes its own world coordinates into the
