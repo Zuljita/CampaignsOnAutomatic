@@ -6,7 +6,7 @@
 
 | Vault path | Kind | Owner (writer) | Readers |
 | --- | --- | --- | --- |
-| `campaign.md` | `campaign` | GM (apps update `oa_refs`, `calendar.current`, `calendar.elapsed_days`, and `party.location` only) | all |
+| `campaign.md` | `campaign` | GM (apps update `oa_refs`, `calendar.current`, `calendar.elapsed_days`, and `party.location` only; the campaign lens owns the `setting-questions` region) | all |
 | `regions/*/region.md` | `region` | Hexes on Automatic | all |
 | `regions/*/hexes/*.md` | `hex` | Hexes on Automatic | all |
 | `settlements/*.md` | `settlement` | Towns on Automatic | all |
@@ -63,6 +63,65 @@ party:
 through (Hexes as they cross hexes, Towns when they enter a settlement,
 Dungeons when they descend) — the cross-app travel record is the succession
 of values, remembered by each lens's own log and the session notes.
+
+Managed sections: `setting-questions` (campaign lens).
+
+#### The `setting-questions` region
+
+The answers to the questions players actually ask about a setting — *where do
+we buy gear, who heals us, who is the mightiest wizard, what is there to eat*.
+The tradition is Jeff Rients' [Twenty Quick Questions for Your Campaign
+Setting](https://jrients.blogspot.com/2011/04/twenty-quick-questions-for-your.html)
+(2011); the vault's contribution is keeping the answers **in the campaign
+instead of in the GM's head**, one file every lens already opens.
+
+The region lives in `campaign.md` and is owned by the campaign lens. Its
+interior is a flat list of answered questions:
+
+```markdown
+<!-- oa:generated begin section="setting-questions" generator="campaigns-on-automatic@0.1.0" -->
+### 2. Where does the party buy ordinary adventuring gear?
+
+Bracken Ford's market row, three days out. Anything above a woodsman's kit is
+a special order through [[npcs/skarn-halfweight|Skarn]] and takes a season.
+
+### 21. Who do we pay when the ford floods?
+
+The reeve, in barley, and she remembers who was short.
+<!-- oa:generated end -->
+```
+
+Grammar — the whole of it:
+
+- One `### <n>. <question>` heading per answered question, `<n>` a positive
+  integer, followed by the answer as ordinary markdown until the next heading
+  or the end fence.
+- **Only answered questions appear.** An unanswered question is an absent
+  heading, not an empty one; the region is a record, not a form.
+- Numbers **1–20** are the canonical question set. The set — its wording and
+  its order — belongs to the campaign lens, not to this spec, so it can be
+  reworded for a system's vocabulary without a spec bump; the number is what
+  the lens keys an answer to. Numbers **21 and up** are the GM's own
+  questions: their heading text is GM-authored and every writer must round-trip
+  it unchanged.
+- Foreign consumers (a lens that did not write the region) read it as
+  **heading text plus answer prose** and ignore the numbering. Nothing else in
+  the vault may key off these numbers.
+
+Rules:
+
+- The region is the one part of `campaign.md` an app may rewrite, and it
+  rewrites the **whole** interior from the answers it parsed — so a GM's edits
+  made in Obsidian survive by being read back in, not by being avoided. The
+  usual escape hatches still apply (delete the fences, or add a `content` lock).
+- The answers are the **GM's**, whatever drafted them. A lens with a model
+  behind it may propose an answer, but nothing lands in the vault until the GM
+  keeps it, and the region records no authorship — an answer here is campaign
+  fact, the same as prose the GM typed.
+- Like any managed section it is GM material by default and participates in the
+  reveal model unchanged: naming `setting-questions` in the campaign note's
+  `oa_reveal.sections` turns the answers into a player-facing setting primer,
+  and until then they do not derive into `player/`.
 
 ### `quest` — quests/\<slug\>.md (GM; apps may mint stubs)
 
@@ -249,7 +308,7 @@ commissions/<slug>.request.json    # written by requesting app or GM
 ```jsonc
 {
   "commission_version": 1,
-  "kind": "site",                       // site | settlement | region
+  "kind": "site",                       // site | settlement | region | npc
   "vault_ref": "site_k3f9x2",           // the stub entity this fulfills
   "requested_by": "hexes-on-automatic@0.1.0",
   "request": { /* kind-specific payload, see below */ },
@@ -264,6 +323,15 @@ commissions/<slug>.request.json    # written by requesting app or GM
   (coordinates, exit bindings, caller ids echoed into the dungeon) stays
   banned; the `vault_ref` linkage lives in the envelope, which DOA writes back
   but never interprets.
+- `kind: "npc"` payloads use the **NpcCommission** contract (`seed`, `roleId`
+  or `narrativeRole`, `tier` 62/125/187, `raceId`, `count`, `names`, `mode`,
+  the individuating context lines `room`/`faction`/`warband`, `ecologyTags`,
+  `includeSheets`, `knobs`). The order names a *person the campaign needs* —
+  "the mightiest wizard in the land", "someone who will sell you a sword" —
+  and the results are an `npcs/<slug>.md` note plus, when asked for, a
+  character sheet under the entity's own folder. Characters on Automatic is
+  the owner; until it ships, Dungeons on Automatic carries the generator and
+  can fulfil these orders. Requesting apps write the envelope either way.
 - The fulfilling app writes the results into the entity's own folder, flips
   `status: fulfilled`, and fills the stub (`oa_status: stub` → `active`).
 - A hex app commissioning a dungeon hashes its own world coordinates into the
